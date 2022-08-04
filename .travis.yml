@@ -1,0 +1,30 @@
+# use the latest ubuntu environment 22.04 LTS available on travis
+# check travis-ci manual : https://docs.travis-ci.com/user/customizing-the-build/#build-timeouts
+dist: jammy
+
+language: go
+
+# You don't need to test on very old versions of the Go compiler. It's the user's
+# responsibility to keep their compiler up to date.
+go:
+  - 1.18.x
+
+# Please note that if you use a depth of 1 and have a queue of jobs, Travis CI won’t build commits that are in the queue when you push a new commit.
+# Some operations on the repository, such as common automated code review scripts (e.g. Pronto for Ruby), may fail due to the limited git clone depth,
+# not being able to access all the objects in the repository. Removing the depth flag, or running git fetch --unshallow might solve the issue.
+#git:
+#  depth: false
+#  submodules: false
+git:
+  depth: 1
+  submodules: false
+
+
+# Skip the install step. Don't `go get` dependencies. Only build with the code
+# in vendor/
+install: true
+
+script:
+  - go mod tidy
+  - go mod vendor
+  - go test -v ./...
