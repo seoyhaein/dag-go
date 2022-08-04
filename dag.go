@@ -67,10 +67,10 @@ func NewDag() *Dag {
 	return dag
 }
 
-func PNewDag(id string, n string) *Dag {
+func NewDagWithPId(pid string, n string) *Dag {
 	dag := new(Dag)
 	dag.nodes = make(map[string]*Node)
-	dag.Id = fmt.Sprintf("%s-%s", id, n)
+	dag.Id = fmt.Sprintf("%s-%s", pid, n)
 	dag.validated = false
 	dag.startNode = dag.createNode(StartNode)
 

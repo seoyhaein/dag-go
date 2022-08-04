@@ -48,7 +48,7 @@ func (pipe *Pipeline) NewDag() *dag.Dag {
 		n = dags + 1
 	}
 	sn := strconv.Itoa(n)
-	dag := dag.PNewDag(pid, sn)
+	dag := dag.NewDagWithPId(pid, sn)
 
 	if dag == nil {
 		return nil
