@@ -15,6 +15,7 @@ import (
 // TODO xml 에서 nodes id 가 있어야 하고, pipeline id 와 매핑 되고,
 // dag ID 는 uuid 인데, 이것은 xml 에서 데이터와 연계 될때 생성되는 uuid 값을 가지고 와서 매핑 된다.
 // TODO xmlNode 를 별도로 두었지만, Node 로 통합하자.
+// Nodes 를 어디에 둘지 고민..
 type (
 	xmlNode struct {
 		id      string
