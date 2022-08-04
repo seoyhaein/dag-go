@@ -13,14 +13,14 @@ func TestNewDag(t *testing.T) {
 
 	dag := NewDag()
 	if assert.NotNil(dag) {
-		err := dag.finishDag()
+		err := dag.FinishDag()
 
 		if err != nil {
 			t.Errorf("%+v", err)
 		}
 		ctx := context.Background()
-		dag.dagSetFunc(ctx)
-		dag.getReady(ctx)
+		dag.DagSetFunc(ctx)
+		dag.GetReady(ctx)
 
 		v := dag.getVertex(dag.startNode.Id, dag.endNode.Id)
 		assert.NotNil(v)
@@ -28,9 +28,9 @@ func TestNewDag(t *testing.T) {
 		numOfEdges := len(dag.Edges)
 		assert.Equal(1, numOfEdges, "There should be only one channel.")
 
-		b1 := dag.start()
+		b1 := dag.Start()
 		assert.Equal(true, b1, "true")
-		b2 := dag.waitTilOver(ctx)
+		b2 := dag.WaitTilOver(ctx)
 		assert.Equal(true, b2, "true")
 
 		// test for start_node, end_node
@@ -47,18 +47,18 @@ func TestSimpleDag(t *testing.T) {
 	dag.AddEdge("2", "3")
 	dag.AddEdge("3", "4")
 
-	err := dag.finishDag()
+	err := dag.FinishDag()
 	if err != nil {
 		t.Errorf("%+v", err)
 	}
 	ctx := context.Background()
-	dag.dagSetFunc(ctx)
-	dag.getReady(ctx)
-	b1 := dag.start()
+	dag.DagSetFunc(ctx)
+	dag.GetReady(ctx)
+	b1 := dag.Start()
 	assert.Equal(true, b1, "true")
 
 	// 에러 발생하게 했다.
-	b2 := dag.waitTilOver(ctx)
+	b2 := dag.WaitTilOver(ctx)
 	assert.Equal(true, b2, "true")
 
 }

@@ -67,6 +67,29 @@ func NewDag() *Dag {
 	return dag
 }
 
+func PNewDag(id string, n string) *Dag {
+	dag := new(Dag)
+	dag.nodes = make(map[string]*Node)
+	dag.Id = fmt.Sprintf("%s-%s", id, n)
+	dag.validated = false
+	dag.startNode = dag.createNode(StartNode)
+
+	// 시작할때 넣어주는 채널 여기서 세팅된다.
+	// error message : 중복된 node id 로 노드를 생성하려고 했습니다, createNode
+	if dag.startNode == nil {
+		return nil
+	}
+	// 시작노드는 반드시 하나의 채널을 넣어 줘야 한다.
+	// start 함수에서 채널 값을 넣어준다.
+	dag.startNode.parentVertex = append(dag.startNode.parentVertex, make(chan int, 1))
+
+	// TODO 일단 퍼퍼를 1000 으로 둠
+	// TODO n 을 향후에는 조정하자. 각 노드의 수로 채널 버퍼를 지정할 수 없다. 또한 그럴 필요도 없을 수도 있다.
+	dag.RunningStatus = make(chan *printStatus, 1000)
+
+	return dag
+}
+
 // createEdge creates an Edge. Edge has the ID of the child node and the ID of the child node.
 // Therefore, the Edge is created with the ID of the parent node and the ID of the child node the same.
 func (dag *Dag) createEdge(parentId, childId string) (*Edge, createEdgeErrorType) {
@@ -365,6 +388,40 @@ func (dag *Dag) AddEdgeFromXmlNodeToStartNode(to *xmlNode) error {
 	return nil
 }
 
+func (dag *Dag) AddNodeToStartNode(to *Node) error {
+
+	if to == nil {
+		return fmt.Errorf("node is nil")
+	}
+
+	fromNode := dag.startNode
+	toNode := dag.nodes[to.Id]
+
+	if toNode != nil {
+		return fmt.Errorf("duplicate nodes exist")
+	}
+
+	if fromNode == toNode {
+		return fmt.Errorf("from-node and to-node are same")
+	}
+
+	fromNode.children = append(fromNode.children, toNode)
+	toNode.parent = append(toNode.parent, fromNode)
+
+	dag.createEdge(fromNode.Id, toNode.Id)
+
+	v := dag.getVertex(fromNode.Id, toNode.Id)
+
+	if v != nil {
+		fromNode.childrenVertex = append(fromNode.childrenVertex, v)
+		toNode.parentVertex = append(toNode.parentVertex, v)
+	} else {
+		fmt.Println("error")
+	}
+
+	return nil
+}
+
 func (dag *Dag) AddEdgeFromXmlNodeToEndNode(from *xmlNode) error {
 
 	return nil
@@ -398,8 +455,8 @@ func (dag *Dag) addEndNode(fromNode, toNode *Node) error {
 	return nil
 }
 
-// finishDag finally, connect end_node to dag
-func (dag *Dag) finishDag() error {
+// FinishDag finally, connect end_node to dag
+func (dag *Dag) FinishDag() error {
 
 	if dag.validated {
 		return fmt.Errorf("validated is already set to true")
@@ -534,19 +591,21 @@ func (dag *Dag) detectCycle(startNodeId string, endNodeId string, visit map[stri
 	return cycle, end
 }
 
-func (dag *Dag) dagSetFunc(ctx context.Context) {
+func (dag *Dag) DagSetFunc(ctx context.Context) bool {
 
 	n := len(dag.nodes)
 	if n < 1 {
-		return
+		return false
 	}
-
+	// TODO setFunc 리턴을 추 가해줘야 함.
 	for _, v := range dag.nodes {
 		setFunc(ctx, v)
 	}
+
+	return true
 }
 
-func (dag *Dag) getReady(ctx context.Context) bool {
+func (dag *Dag) GetReady(ctx context.Context) bool {
 	n := len(dag.nodes)
 	if n < 1 {
 		return false
@@ -559,9 +618,9 @@ func (dag *Dag) getReady(ctx context.Context) bool {
 	return true
 }
 
-// start start_node has one vertex. That is, it has only one channel and this channel is not included in the edge.
+// Start start_node has one vertex. That is, it has only one channel and this channel is not included in the edge.
 // It is started by sending a value to this channel when starting the dag's operation.
-func (dag *Dag) start() bool {
+func (dag *Dag) Start() bool {
 	n := len(dag.startNode.parentVertex)
 	// 1 이 아니면 에러다.
 	if n != 1 {
@@ -581,7 +640,7 @@ func (dag *Dag) start() bool {
 // waitTilOver waits until all channels are closed. RunningStatus channel has multiple senders and one receiver
 // Closing a channel on a receiver violates the general channel close principle.
 // However, when waitTilOver terminates, it seems safe to close the channel here because all tasks are finished.
-func (dag *Dag) waitTilOver(ctx context.Context) bool {
+func (dag *Dag) WaitTilOver(ctx context.Context) bool {
 
 	defer close(dag.RunningStatus)
 	for {
@@ -634,23 +693,8 @@ func (dag *Dag) waitTilOver(ctx context.Context) bool {
 
 }
 
-// TODO 일단 그냥 대충 이렇게 함 추후 수정할 예정임.
-
-func (dag *Dag) Ready(ctx context.Context) {
-	dag.dagSetFunc(ctx)
-	dag.getReady(ctx)
-}
-
-// time.Second 이거 지워야 함. 그냥 넣어줌.
-
-func (dag *Dag) Start() {
-	dag.start()
-	dag.waitTilOver(nil)
-}
-
-func (dag *Dag) Stop() {
-	time.After(time.Second * 2)
-}
+// TODO context cancel 관련 해서 추가 해줘야 하고 start() 같은 경우도 처리 해줘야 한다.
+// 약간 이상한 모양인 데이걸 처리하는
 
 // TODO 나중에 수정해주자.
 
