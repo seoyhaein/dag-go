@@ -30,6 +30,15 @@ type Node struct {
 	// TODO re-thinking
 	// https://yoongrammer.tistory.com/36
 	context.Context
+
+	// TODO commands 복수로 할지 하나로 할지는 고민한다.
+	cmd []*Command
+	c   *Command
+
+	// 추후 commands string 과 교체
+	bashCommand []string
+	// 컨테이너 빌드를 위한 from 이미지.
+	ImageName string
 }
 
 // (do not erase) close 해주는 것 : func (dag *Dag) waitTilOver(ctx context.Context) bool  에서 defer close(dag.RunningStatus) 해줌
@@ -117,6 +126,10 @@ func inFlight(ctx context.Context, n *Node) *printStatus {
 	} else { // TODO debug 모드때문에 넣어 놓았음. AddEdge 하면 commands. 안들어감. 추후 삭제하거나, 다른 방향으로 작성해야함.
 		if len(strings.TrimSpace(n.commands)) == 0 {
 			fmt.Println(n.Id)
+			// TODO command 추가
+			if n.c != nil {
+				n.c.Execute()
+			}
 			bResult = true
 		} else {
 			bResult = shellexecmd.Runner(n.commands)
@@ -270,4 +283,48 @@ func cloneGraph(ns map[string]*Node) (map[string]*Node, bool) {
 	}
 
 	return visited, iscycle
+}
+
+// create command, 일단 간단히 기능 구현만 한다. 추후 보강한다.
+
+func InitCommand() (cmd *Command) {
+	cmd = &Command{
+		RunE: func() error {
+			fmt.Println("hello world")
+			return nil
+		},
+	}
+
+	return
+}
+
+func (n *Node) AddCommand(cmds ...*Command) {
+
+	for _, cmd := range cmds {
+		n.cmd = append(n.cmd, cmd)
+	}
+}
+
+// 컨테이너 생성하고 하는 루틴이 들어가야 할듯하다.
+// 일단은 직넙 podbrdige 와 직접 연결하고 추후에는 함수를 만들어서 간접적으로 연결 할 수 있도록 한다. 즉, 다른 프로젝트에서 해당 함수를 이용해서 연결 하는 방향으로 간다.
+
+func (n *Node) AddCommandT() {
+
+	var cmd = &Command{
+		RunE: func() error {
+			fmt.Println("hello world")
+			return nil
+		},
+	}
+
+	n.c = cmd
+}
+
+// TODO node 에 명령어 등 넣고 생성하는 메서드
+func createNode(id string) (node *Node) {
+	node = &Node{
+		Id:       id,
+		commands: "",
+	}
+	return
 }

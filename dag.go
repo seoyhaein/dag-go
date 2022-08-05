@@ -178,14 +178,19 @@ func (dag *Dag) createNode(id string) *Node {
 			return nil
 		}
 	}
+	// TODO 추가적으로 수정할 예정임.
+	node := createNode(id)
 
-	node := &Node{Id: id}
+	// TODO add command 버그 존재할 수 있음, 추후 수정할 예정임.
+	//node.AddCommandT()
+
 	node.parentDag = dag
 	dag.nodes[id] = node
 
 	return node
 }
 
+// TODO createNode 와 통합해야 한다.
 func (dag *Dag) createNodeFromXmlNode(xnode *xmlNode) *Node {
 
 	if xnode == nil {
@@ -199,8 +204,11 @@ func (dag *Dag) createNodeFromXmlNode(xnode *xmlNode) *Node {
 		}
 	}
 
-	node := &Node{Id: xnode.id}
+	node := createNode(id)
 	node.commands = xnode.command
+	// TODO add command 버그 존재할 수 있음, 추후 수정할 예정임.
+	//node.AddCommandT()
+
 	node.parentDag = dag
 	dag.nodes[xnode.id] = node
 
@@ -637,7 +645,7 @@ func (dag *Dag) Start() bool {
 	return true
 }
 
-// waitTilOver waits until all channels are closed. RunningStatus channel has multiple senders and one receiver
+// WaitTilOver waits until all channels are closed. RunningStatus channel has multiple senders and one receiver
 // Closing a channel on a receiver violates the general channel close principle.
 // However, when waitTilOver terminates, it seems safe to close the channel here because all tasks are finished.
 func (dag *Dag) WaitTilOver(ctx context.Context) bool {
@@ -731,4 +739,42 @@ func (dag *Dag) DisableTimeout() {
 	if dag.bTimeout == true {
 		dag.bTimeout = false
 	}
+
+}
+
+// TODO node 의 field 가 늘어날때 수정해준다.
+// 특정 노드에만 명령어를 주기 위해서
+// 지금은 AddEdge 를 통해서 createNode 가 되어 버리는 형태가 되어서 일단은 만들어진 node 에 넣어 주는 형태로 만들고 수정해야 할지 고민하자.
+// 대충 만듬. 수정해야함.
+
+func (dag *Dag) SetCommandNode(id, c string, cmd *Command) (node *Node) {
+
+	if n, b := ExistedNode(dag, id); b == true {
+
+		var cmd = &Command{
+			RunE: func() error {
+				fmt.Println("hello world")
+				return nil
+			},
+		}
+
+		n.c = cmd
+	}
+
+	return
+}
+
+// TODO 이름 수정해줘야 한다.
+// ExistedNode node가 dag 에 있으면 true 리턴 그렇지 않으면 false 리턴
+// 추후 이 메서드 다 적용.
+
+func ExistedNode(dag *Dag, nodeId string) (*Node, bool) {
+
+	for _, n := range dag.nodes {
+		if n.Id == nodeId {
+			return n, true
+		}
+	}
+
+	return nil, false
 }

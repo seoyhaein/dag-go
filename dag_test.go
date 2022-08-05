@@ -47,6 +47,8 @@ func TestSimpleDag(t *testing.T) {
 	dag.AddEdge("2", "3")
 	dag.AddEdge("3", "4")
 
+	dag.SetCommandNode("1", "", nil)
+
 	err := dag.FinishDag()
 	if err != nil {
 		t.Errorf("%+v", err)

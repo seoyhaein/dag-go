@@ -24,6 +24,8 @@ func NewPipeline() *Pipeline {
 	}
 }
 
+// TODO 모든 dag 들을 실행 시킬 수 있어야 한다.
+
 func (pipe *Pipeline) Start(ctx context.Context, dag *dag.Dag) {
 	dag.DagSetFunc(ctx)
 	dag.GetReady(ctx)
@@ -39,7 +41,7 @@ func (pipe *Pipeline) ReStart(ctx context.Context, dag *dag.Dag) {
 
 }
 
-func (pipe *Pipeline) NewDag() *dag.Dag {
+func (pipe *Pipeline) NewDags() *dag.Dag {
 	n := 1
 	pid := pipe.Id
 	dags := len(pipe.Dags)

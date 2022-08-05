@@ -90,6 +90,7 @@ func xmlParserT(x Nodes) (bool, *Dag) {
 
 	n := len(x)
 
+	// TODO 2 이상 이어야 할듯.
 	if n >= 1 { // node 가 최소 하나 이상은 있어야 한다.
 
 		dag := NewDag()
@@ -463,7 +464,7 @@ func xmlProcessT(parser *xml.Decoder) (int, Nodes) {
 }
 
 func newDecoder(b []byte) *xml.Decoder {
-	// NewDecoder 에서 Strict field true 해줌.
+	// (do not erase) NewDecoder 에서 Strict field true 해줌.
 	d := xml.NewDecoder(bytes.NewReader(b))
 	return d
 }

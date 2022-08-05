@@ -25,6 +25,26 @@ func TestXmlProcess(t *testing.T) {
 	}
 }
 
+func TestXmlProcessT(t *testing.T) {
+	d := serveXml()
+	decoder := newDecoder(d)
+	c, nodes := xmlProcessT(decoder)
+
+	fmt.Println("count :", c)
+
+	for _, node := range nodes {
+		fmt.Println("Node Id: ", node.Id)
+		for _, t := range node.to {
+			fmt.Println("To", t)
+		}
+		for _, f := range node.from {
+			fmt.Println("From", f)
+		}
+		fmt.Println("Command ", node.commands)
+
+	}
+}
+
 func TestXmlsProcess(t *testing.T) {
 	xmls := serveXmls()
 	num := len(xmls)
@@ -50,6 +70,37 @@ func TestXmlsProcess(t *testing.T) {
 				fmt.Println("From", f)
 			}
 			fmt.Println("Command ", node.command)
+
+		}
+	}
+
+}
+
+func TestXmlsProcessT(t *testing.T) {
+	xmls := serveXmls()
+	num := len(xmls)
+	if num == 0 {
+		fmt.Println("값이 없음")
+		return
+	}
+
+	for _, xml := range xmls {
+		d := []byte(xml)
+
+		decoder := newDecoder(d)
+		c, nodes := xmlProcessT(decoder)
+
+		fmt.Println("count :", c)
+
+		for _, node := range nodes {
+			fmt.Println("Node Id: ", node.Id)
+			for _, t := range node.to {
+				fmt.Println("To", t)
+			}
+			for _, f := range node.from {
+				fmt.Println("From", f)
+			}
+			fmt.Println("Command ", node.commands)
 
 		}
 	}
