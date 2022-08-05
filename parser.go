@@ -470,6 +470,7 @@ func newDecoder(b []byte) *xml.Decoder {
 }
 
 // TODO 그냥 이렇게 만든다.
+
 func XmlParser(d []byte) (bool, *Dag) {
 
 	decoder := newDecoder(d)
@@ -479,7 +480,8 @@ func XmlParser(d []byte) (bool, *Dag) {
 	return b, dag
 }
 
-// TODO 내일 테스트 하자.
+// TODO 내일 테스트 하자. -> 테스트는 일단 성공했는데 깊숙히 보지 않음.
+
 func XmlParserT(d []byte) (bool, *Dag) {
 
 	decoder := newDecoder(d)
