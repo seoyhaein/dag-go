@@ -24,13 +24,19 @@ func NewPipeline() *Pipeline {
 	}
 }
 
-// TODO 모든 dag 들을 실행 시킬 수 있어야 한다.
+// TODO 모든 dag 들을 실행 시킬 수 있어야 한다. 수정해줘야 한다
 
-func (pipe *Pipeline) Start(ctx context.Context, dag *dag.Dag) {
-	dag.DagSetFunc(ctx)
-	dag.GetReady(ctx)
-	dag.Start()
-	dag.WaitTilOver(ctx)
+func (pipe *Pipeline) Start(ctx context.Context) {
+	if pipe.Dags == nil {
+		return
+	}
+
+	for _, d := range pipe.Dags {
+		d.DagSetFunc(ctx)
+		d.GetReady(ctx)
+		d.Start()
+		d.WaitTilOver(ctx)
+	}
 }
 
 func (pipe *Pipeline) Stop(ctx context.Context, dag *dag.Dag) {
@@ -40,6 +46,10 @@ func (pipe *Pipeline) Stop(ctx context.Context, dag *dag.Dag) {
 func (pipe *Pipeline) ReStart(ctx context.Context, dag *dag.Dag) {
 
 }
+
+// 파이프라인과 dag 의 차이점은 데이터의 차이이다.
+// 즉, 같은 dag 이지만 데이터가 다를 수 있다.
+// TODO 데이터와 관련해서 추가 해서 수정해줘야 한다.
 
 func (pipe *Pipeline) NewDags() *dag.Dag {
 	n := 1
