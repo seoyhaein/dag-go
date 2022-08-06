@@ -523,7 +523,6 @@ func (dag *Dag) WaitTilOver(ctx context.Context) bool {
 
 // TODO context cancel 관련 해서 추가 해줘야 하고 start() 같은 경우도 처리 해줘야 한다.
 // 약간 이상한 모양인 데이걸 처리하는
-
 // TODO 나중에 수정해주자.
 
 func printRunningStatus(status *printStatus) {

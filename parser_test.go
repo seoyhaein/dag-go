@@ -235,6 +235,7 @@ func xmlss() {
 // parser 테스트
 // TODO 버그 있음. read |0: file already closed
 // xmlParser 에서 입력 파라미터 포인터로 할지 생각하자.
+// 순서대로 출력되는지 파악해야 한다. 잘못 출력되는 경우 발견.
 func TestXmlParser(t *testing.T) {
 	d := serveXml()
 	decoder := newDecoder(d)

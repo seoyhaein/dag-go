@@ -1,6 +1,6 @@
 package main
 
-import (
+/*import (
 	dag "github.com/seoyhaein/dag-go"
 )
 
@@ -82,8 +82,8 @@ func main() {
 		</node>
 	</nodes>`
 
-	d := []byte(xml)
-	_, graph := dag.XmlParser(d)
+	//d := []byte(xml)
+	//_, graph := dag.XmlParser(d)
 
-	graph.Start()
-}
+	//graph.Start()
+}*/
