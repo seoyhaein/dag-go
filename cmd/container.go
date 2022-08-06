@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	dag "github.com/seoyhaein/dag-go"
-	pdb "github.com/seoyhaein/podbridge"
+	lm "github.com/seoyhaein/podbridge/localmachine"
 )
 
 func CreateCommand() *dag.Command {
@@ -21,7 +21,7 @@ func CreateCommand() *dag.Command {
 }
 
 func InitCommand() (*context.Context, error) {
-	cTx, err := pdb.NewConnectionLinux(context.Background())
+	cTx, err := lm.NewConnectionLinux(context.Background())
 
 	if err != nil {
 		return nil, fmt.Errorf("check whether the podman-related dependencies and installation have been completed, " +
