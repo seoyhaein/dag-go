@@ -561,14 +561,10 @@ func (dag *Dag) DisableTimeout() {
 
 }
 
-// TODO node 의 field 가 늘어날때 수정해준다.
-// 특정 노드에만 명령어를 주기 위해서
-// 지금은 AddEdge 를 통해서 createNode 가 되어 버리는 형태가 되어서 일단은 만들어진 node 에 넣어 주는 형태로 만들고 수정해야 할지 고민하자.
-// 대충 만듬. 수정해야함.
+// AddCommand add command to node. TODO node 의 field 가 늘어날때 수정해준다.
+func (dag *Dag) AddCommand(id, c string, cmd *Command) (node *Node) {
 
-func (dag *Dag) SetCommandNode(id, c string, cmd *Command) (node *Node) {
-
-	if n, b := ExistedNode(dag, id); b == true {
+	if n, b := nodeExist(dag, id); b == true {
 
 		var cmd = &Command{
 			RunE: func() error {
@@ -583,11 +579,8 @@ func (dag *Dag) SetCommandNode(id, c string, cmd *Command) (node *Node) {
 	return
 }
 
-// TODO 이름 수정해줘야 한다.
-// ExistedNode node가 dag 에 있으면 true 리턴 그렇지 않으면 false 리턴
-// 추후 이 메서드 다 적용.
-
-func ExistedNode(dag *Dag, nodeId string) (*Node, bool) {
+// nodeExist returns true if node is in dag, false otherwise
+func nodeExist(dag *Dag, nodeId string) (*Node, bool) {
 
 	for _, n := range dag.nodes {
 		if n.Id == nodeId {
