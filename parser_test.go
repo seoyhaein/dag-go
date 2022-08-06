@@ -238,7 +238,13 @@ func xmlss() {
 func TestXmlParser(t *testing.T) {
 	d := serveXml()
 	decoder := newDecoder(d)
-	_, xmlNodes := xmlProcess(decoder)
+	_, nodes := xmlProcess(decoder)
 
-	xmlParser(xmlNodes)
+	ctx, b, dag := xmlParser(nodes)
+
+	if b {
+		dag.Start()
+		dag.WaitTilOver(ctx)
+	}
+
 }

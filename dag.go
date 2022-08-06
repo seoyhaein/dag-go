@@ -616,6 +616,7 @@ func (dag *Dag) AddNodeToStartNode(to *Node) error {
 		return fmt.Errorf("from-node and to-node are same")
 	}
 
+	toNode = to
 	fromNode.children = append(fromNode.children, toNode)
 	toNode.parent = append(toNode.parent, fromNode)
 

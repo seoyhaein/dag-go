@@ -26,13 +26,13 @@ type (
 
 	xmlNodes []*xmlNode
 
-	Nodes []*Node
+	//Nodes []*Node
 )
 
-func xmlParser(x Nodes) (bool, *Dag) {
+func xmlParser(x []*Node) (context.Context, bool, *Dag) {
 
 	if x == nil {
-		return false, nil
+		return nil, false, nil
 	}
 
 	n := len(x)
@@ -73,13 +73,13 @@ func xmlParser(x Nodes) (bool, *Dag) {
 		//fmt.Println("모든 고루틴이 종료될때까지 그냥 기다림.")
 		//fmt.Printf("true 이면 정상 : %t", b)
 
-		return true, dag
+		return ctx, true, dag
 	}
 
-	return false, nil
+	return nil, false, nil
 }
 
-func findNode(ns Nodes, id string) *Node {
+func findNode(ns []*Node, id string) *Node {
 
 	if ns == nil {
 		return nil
@@ -94,11 +94,11 @@ func findNode(ns Nodes, id string) *Node {
 	return nil
 }
 
-func xmlProcess(parser *xml.Decoder) (int, Nodes) {
+func xmlProcess(parser *xml.Decoder) (int, []*Node) {
 	var (
-		counter       = 0
-		n       *Node = nil
-		ns      Nodes = nil
+		counter         = 0
+		n       *Node   = nil
+		ns      []*Node = nil
 		// TODO bool 로 하면 안됨 int 로 바꿔야 함. 초기 값은 0, false = 1, true = 2 로
 		xStart    = false
 		nStart    = false
@@ -249,11 +249,11 @@ func newDecoder(b []byte) *xml.Decoder {
 	return d
 }
 
-func XmlParser(d []byte) (bool, *Dag) {
+func XmlParser(d []byte) (context.Context, bool, *Dag) {
 
 	decoder := newDecoder(d)
 	_, nodes := xmlProcess(decoder)
-	b, dag := xmlParser(nodes)
+	ctx, b, dag := xmlParser(nodes)
 
-	return b, dag
+	return ctx, b, dag
 }
