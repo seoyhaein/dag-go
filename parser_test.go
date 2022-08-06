@@ -8,27 +8,7 @@ import (
 func TestXmlProcess(t *testing.T) {
 	d := serveXml()
 	decoder := newDecoder(d)
-	c, xmlNodes := xmlProcess(decoder)
-
-	fmt.Println("count :", c)
-
-	for _, node := range xmlNodes {
-		fmt.Println("Node Id: ", node.id)
-		for _, t := range node.to {
-			fmt.Println("To", t)
-		}
-		for _, f := range node.from {
-			fmt.Println("From", f)
-		}
-		fmt.Println("Command ", node.command)
-
-	}
-}
-
-func TestXmlProcessT(t *testing.T) {
-	d := serveXml()
-	decoder := newDecoder(d)
-	c, nodes := xmlProcessT(decoder)
+	c, nodes := xmlProcess(decoder)
 
 	fmt.Println("count :", c)
 
@@ -57,38 +37,7 @@ func TestXmlsProcess(t *testing.T) {
 		d := []byte(xml)
 
 		decoder := newDecoder(d)
-		c, xmlNodes := xmlProcess(decoder)
-
-		fmt.Println("count :", c)
-
-		for _, node := range xmlNodes {
-			fmt.Println("Node Id: ", node.id)
-			for _, t := range node.to {
-				fmt.Println("To", t)
-			}
-			for _, f := range node.from {
-				fmt.Println("From", f)
-			}
-			fmt.Println("Command ", node.command)
-
-		}
-	}
-
-}
-
-func TestXmlsProcessT(t *testing.T) {
-	xmls := serveXmls()
-	num := len(xmls)
-	if num == 0 {
-		fmt.Println("값이 없음")
-		return
-	}
-
-	for _, xml := range xmls {
-		d := []byte(xml)
-
-		decoder := newDecoder(d)
-		c, nodes := xmlProcessT(decoder)
+		c, nodes := xmlProcess(decoder)
 
 		fmt.Println("count :", c)
 

@@ -190,31 +190,6 @@ func (dag *Dag) createNode(id string) *Node {
 	return node
 }
 
-// TODO createNode 와 통합해야 한다.
-func (dag *Dag) createNodeFromXmlNode(xnode *xmlNode) *Node {
-
-	if xnode == nil {
-		return nil
-	}
-
-	// 중복된 id 가 있으면 nil 리턴
-	for _, n := range dag.nodes {
-		if n.Id == xnode.id {
-			return nil
-		}
-	}
-
-	node := createNode(id)
-	node.commands = xnode.command
-	// TODO add command 버그 존재할 수 있음, 추후 수정할 예정임.
-	//node.AddCommandT()
-
-	node.parentDag = dag
-	dag.nodes[xnode.id] = node
-
-	return node
-}
-
 // error log 는 일단 여기서만 작성
 
 func (dag *Dag) AddEdge(from, to string) error {
@@ -276,161 +251,6 @@ func (dag *Dag) AddEdge(from, to string) error {
 		dag.errLogs = append(dag.errLogs, &systemError{AddEdge, err})
 		return err
 	}
-
-	return nil
-}
-
-// TODO 향후 xmlNode 와 Node 가 통합되면 아래 메서드들 수정해주어야 함.
-
-func (dag *Dag) AddEdgeFromXmlNode(from, to *xmlNode) error {
-
-	if from == nil {
-		return fmt.Errorf("from-xmlNode is nil")
-	}
-
-	if to == nil {
-		return fmt.Errorf("to-xmlNode is nil")
-	}
-
-	if from.id == to.id {
-		return fmt.Errorf("from.id and to.id are same")
-	}
-
-	fromNode := dag.nodes[from.id]
-	if fromNode == nil {
-		fromNode = dag.createNodeFromXmlNode(from)
-
-		if fromNode == nil {
-			return fmt.Errorf("fromNode: createNodeFromXmlNode return nil")
-		}
-	}
-	toNode := dag.nodes[to.id]
-	if toNode == nil {
-		toNode = dag.createNodeFromXmlNode(to)
-
-		if toNode == nil {
-			return fmt.Errorf("toNode: createNodeFromXmlNode return nil")
-		}
-	}
-
-	// 원은 허용하지 않는다.
-	// TODO 향후 어떻게 고칠지 생각해 보자.
-	// 일단은 주석처리 한다.
-	/*if strings.Contains(toNode.Id, "start_node") {
-		return fmt.Errorf("circle is not allowed.")
-	}*/
-
-	fromNode.children = append(fromNode.children, toNode)
-	toNode.parent = append(toNode.parent, fromNode)
-
-	edge, check := dag.createEdge(fromNode.Id, toNode.Id)
-	if check == Fault || check == Exist {
-		return fmt.Errorf("Edge cannot be created")
-	}
-
-	if edge != nil {
-		fromNode.childrenVertex = append(fromNode.childrenVertex, edge.vertex)
-		toNode.parentVertex = append(toNode.parentVertex, edge.vertex)
-	} else {
-		fmt.Errorf("vertex is nil")
-	}
-	return nil
-}
-
-func (dag *Dag) AddEdgeFromXmlNodeToStartNode(to *xmlNode) error {
-	/*fromNode := dag.nodes[from.id]
-	if fromNode == nil {
-		fromNode = dag.createNodeFromXmlNode(from)
-	}*/
-	if to == nil {
-		return fmt.Errorf("xmlNode is nil")
-	}
-
-	fromNode := dag.startNode
-	toNode := dag.nodes[to.id]
-	if toNode == nil {
-		toNode = dag.createNodeFromXmlNode(to)
-	}
-
-	if fromNode == toNode {
-		return fmt.Errorf("from-node and to-node are same")
-	}
-
-	// 원은 허용하지 않는다.
-	// TODO 향후 어떻게 고칠지 생각해 보자.
-	// 일단은 주석처리 한다.
-	/*if strings.Contains(toNode.Id, "start_node") {
-		return fmt.Errorf("circle is not allowed.")
-	}*/
-
-	fromNode.children = append(fromNode.children, toNode)
-	toNode.parent = append(toNode.parent, fromNode)
-
-	//fromNode.outdegree++
-	//toNode.indegree++
-
-	//check := dag.createEdge(fromNode.Id, toNode.Id)
-	dag.createEdge(fromNode.Id, toNode.Id)
-	// 생성 시키면 0, 이 존재하면 1, 에러면 2
-	// TODO 향후 에러코드 만들면 수정해야함.
-	/*if check == 0 {
-		fmt.Println("만들어줌.")
-	}
-	if check == 1 {
-		fmt.Println("존재함")
-	}
-
-	if check == 2 {
-		fmt.Println("에러")
-	}*/
-
-	v := dag.getVertex(fromNode.Id, toNode.Id)
-
-	if v != nil {
-		fromNode.childrenVertex = append(fromNode.childrenVertex, v)
-		toNode.parentVertex = append(toNode.parentVertex, v)
-	} else {
-		fmt.Println("error")
-	}
-
-	return nil
-}
-
-func (dag *Dag) AddNodeToStartNode(to *Node) error {
-
-	if to == nil {
-		return fmt.Errorf("node is nil")
-	}
-
-	fromNode := dag.startNode
-	toNode := dag.nodes[to.Id]
-
-	if toNode != nil {
-		return fmt.Errorf("duplicate nodes exist")
-	}
-
-	if fromNode == toNode {
-		return fmt.Errorf("from-node and to-node are same")
-	}
-
-	fromNode.children = append(fromNode.children, toNode)
-	toNode.parent = append(toNode.parent, fromNode)
-
-	dag.createEdge(fromNode.Id, toNode.Id)
-
-	v := dag.getVertex(fromNode.Id, toNode.Id)
-
-	if v != nil {
-		fromNode.childrenVertex = append(fromNode.childrenVertex, v)
-		toNode.parentVertex = append(toNode.parentVertex, v)
-	} else {
-		fmt.Println("error")
-	}
-
-	return nil
-}
-
-func (dag *Dag) AddEdgeFromXmlNodeToEndNode(from *xmlNode) error {
 
 	return nil
 }
@@ -777,4 +597,38 @@ func ExistedNode(dag *Dag, nodeId string) (*Node, bool) {
 	}
 
 	return nil, false
+}
+
+func (dag *Dag) AddNodeToStartNode(to *Node) error {
+
+	if to == nil {
+		return fmt.Errorf("node is nil")
+	}
+
+	fromNode := dag.startNode
+	toNode := dag.nodes[to.Id]
+
+	if toNode != nil {
+		return fmt.Errorf("duplicate nodes exist")
+	}
+
+	if fromNode == toNode {
+		return fmt.Errorf("from-node and to-node are same")
+	}
+
+	fromNode.children = append(fromNode.children, toNode)
+	toNode.parent = append(toNode.parent, fromNode)
+
+	dag.createEdge(fromNode.Id, toNode.Id)
+
+	v := dag.getVertex(fromNode.Id, toNode.Id)
+
+	if v != nil {
+		fromNode.childrenVertex = append(fromNode.childrenVertex, v)
+		toNode.parentVertex = append(toNode.parentVertex, v)
+	} else {
+		fmt.Println("error")
+	}
+
+	return nil
 }
