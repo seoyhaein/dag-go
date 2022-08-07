@@ -2,8 +2,9 @@ package dag_go
 
 import (
 	"context"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // https://github.com/stretchr/testify
