@@ -287,7 +287,7 @@ func cloneGraph(ns map[string]*Node) (map[string]*Node, bool) {
 
 // create command, 일단 간단히 기능 구현만 한다. 추후 보강한다.
 
-func InitCommand() (cmd *Command) {
+/*func InitCommand() (cmd *Command) {
 	cmd = &Command{
 		RunE: func() error {
 			fmt.Println("hello world")
@@ -296,19 +296,19 @@ func InitCommand() (cmd *Command) {
 	}
 
 	return
-}
+}*/
 
-func (n *Node) AddCommand(cmds ...*Command) {
+/*func (n *Node) AddCommand(cmds ...*Command) {
 
 	for _, cmd := range cmds {
 		n.cmd = append(n.cmd, cmd)
 	}
-}
+}*/
 
 // 컨테이너 생성하고 하는 루틴이 들어가야 할듯하다.
 // 일단은 직넙 podbrdige 와 직접 연결하고 추후에는 함수를 만들어서 간접적으로 연결 할 수 있도록 한다. 즉, 다른 프로젝트에서 해당 함수를 이용해서 연결 하는 방향으로 간다.
 
-func (n *Node) AddCommandT() {
+/*func (n *Node) AddCommandT() {
 
 	var cmd = &Command{
 		RunE: func() error {
@@ -318,13 +318,22 @@ func (n *Node) AddCommandT() {
 	}
 
 	n.c = cmd
-}
+}*/
 
+// TODO 내일 수정하자. func CreateCommand(n *Node, r Runnable) *Command -> command.go 참고
 // TODO node 에 명령어 등 넣고 생성하는 메서드
+// (dag *Dag) createNode(id string) *Node  에 들어가는데 상위 노출 되는 시점을 찾아서 외부 노출 방안을 고민해보자.
 func createNode(id string) (node *Node) {
 	node = &Node{
-		Id:       id,
-		commands: "",
+		Id: id,
+		c:  new(Command),
 	}
+	node.c.this = node
 	return
+}
+
+func CreateNode(id string, r Runnable) *Node {
+
+	createNode(id)
+	return nil
 }

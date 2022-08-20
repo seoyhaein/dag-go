@@ -420,7 +420,6 @@ func (dag *Dag) detectCycle(startNodeId string, endNodeId string, visit map[stri
 }
 
 func (dag *Dag) DagSetFunc(ctx context.Context) bool {
-
 	n := len(dag.nodes)
 	if n < 1 {
 		return false
@@ -429,7 +428,6 @@ func (dag *Dag) DagSetFunc(ctx context.Context) bool {
 	for _, v := range dag.nodes {
 		setFunc(ctx, v)
 	}
-
 	return true
 }
 
@@ -438,11 +436,9 @@ func (dag *Dag) GetReady(ctx context.Context) bool {
 	if n < 1 {
 		return false
 	}
-
 	for _, v := range dag.nodes {
 		go v.runner(ctx, v, dag.RunningStatus)
 	}
-
 	return true
 }
 
@@ -550,7 +546,6 @@ func (dag *Dag) SetTimeout(d time.Duration) {
 	if dag.bTimeout == false {
 		dag.bTimeout = true
 	}
-
 	dag.Timeout = d
 }
 
@@ -558,24 +553,14 @@ func (dag *Dag) DisableTimeout() {
 	if dag.bTimeout == true {
 		dag.bTimeout = false
 	}
-
 }
 
 // AddCommand add command to node. TODO node 의 field 가 늘어날때 수정해준다.
-func (dag *Dag) AddCommand(id, c string, cmd *Command) (node *Node) {
-
+func (dag *Dag) AddCommand(id, c string, cmd string) (node *Node) {
+	node = nil
 	if n, b := nodeExist(dag, id); b == true {
-
-		var cmd = &Command{
-			RunE: func() error {
-				fmt.Println("hello world")
-				return nil
-			},
-		}
-
-		n.c = cmd
+		n.commands = cmd
 	}
-
 	return
 }
 
