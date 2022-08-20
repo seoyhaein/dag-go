@@ -27,6 +27,10 @@ func Connect() *Container {
 	}
 }
 
+func DefaultImage() {
+
+}
+
 func (c *Container) RunE(n *dag.Node) (int, error) {
 	/*// TODO 바깥으로 빼자.
 	ctx, err := pbr.NewConnectionLinux(context.Background())
