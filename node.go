@@ -65,6 +65,8 @@ func setFunc(ctx context.Context, n *Node) {
 	}
 }
 
+// preFlight preFlight, inFlight, postFlight 에서의 node 는 같은 노드이다.
+// runner 에서 순차적으로 동작한다.
 func preFlight(ctx context.Context, n *Node) *printStatus {
 	if n == nil {
 		panic(fmt.Errorf("node is nil"))
@@ -115,7 +117,8 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 	return &printStatus{Preflight, n.Id}
 }*/
 
-// TODO 특정 노드에서 실행 취소가 발생할 수 있도록 해야 한다.
+// inFlight preFlight, inFlight, postFlight 에서의 node 는 같은 노드이다.
+// runner 에서 순차적으로 동작한다.
 func inFlight(ctx context.Context, n *Node) *printStatus {
 	if n == nil {
 		panic(fmt.Errorf("node is nil"))
@@ -123,11 +126,11 @@ func inFlight(ctx context.Context, n *Node) *printStatus {
 	}
 
 	if n.Id == StartNode {
-		fmt.Println("start dag-go ", n.Id)
+		Log.Println("start dag-go ", n.Id)
 	}
 
 	if n.Id == EndNode {
-		fmt.Println("end all tasks", n.Id)
+		Log.Println("end all tasks", n.Id)
 	}
 
 	var bResult = false
@@ -135,14 +138,14 @@ func inFlight(ctx context.Context, n *Node) *printStatus {
 	if n.Id == StartNode || n.Id == EndNode {
 		bResult = true
 	} else { // TODO debug 모드때문에 넣어 놓았음. AddEdge 하면 commands. 안들어감. 추후 삭제하거나, 다른 방향으로 작성해야함.
-		fmt.Println(n.Id)
+		Log.Println(n.Id)
 
 		// 성골할때만 명령을 실행시키고, 실패할경우는 채널에 값만 흘려 보낸다.
 		if n.succeed {
 			err := n.RunCommand.RunE()
 
 			if err != nil {
-				fmt.Println("실패")
+				Log.Println("실패")
 				bResult = false
 				n.succeed = false
 			} else {
@@ -170,6 +173,8 @@ func inFlight(ctx context.Context, n *Node) *printStatus {
 	}
 }
 
+// postFlight preFlight, inFlight, postFlight 에서의 node 는 같은 노드이다.
+// runner 에서 순차적으로 동작한다.
 func postFlight(ctx context.Context, n *Node) *printStatus {
 	if n == nil {
 		panic(fmt.Errorf("node is nil"))
@@ -321,44 +326,7 @@ func cloneGraph(ns map[string]*Node) (map[string]*Node, bool) {
 	return visited, iscycle
 }
 
-// create command, 일단 간단히 기능 구현만 한다. 추후 보강한다.
-
-/*func InitCommand() (cmd *Command) {
-	cmd = &Command{
-		RunE: func() error {
-			fmt.Println("hello world")
-			return nil
-		},
-	}
-
-	return
-}*/
-
-/*func (n *Node) AddCommand(cmds ...*Command) {
-
-	for _, cmd := range cmds {
-		n.cmd = append(n.cmd, cmd)
-	}
-}*/
-
-// 컨테이너 생성하고 하는 루틴이 들어가야 할듯하다.
-// 일단은 직넙 podbrdige 와 직접 연결하고 추후에는 함수를 만들어서 간접적으로 연결 할 수 있도록 한다. 즉, 다른 프로젝트에서 해당 함수를 이용해서 연결 하는 방향으로 간다.
-
-/*func (n *Node) AddCommandT() {
-
-	var cmd = &Command{
-		RunE: func() error {
-			fmt.Println("hello world")
-			return nil
-		},
-	}
-
-	n.c = cmd
-}*/
-
-// TODO 내일 수정하자. func CreateCommand(n *Node, r Runnable) *Command -> command.go- 참고
-// TODO node 에 명령어 등 넣고 생성하는 메서드
-// createNode(id string) *Node  에 들어가는데 상위 노출 되는 시점을 찾아서 외부 노출 방안을 고민해보자.
+// createNode add by seoy
 func createNode(id string, r Runnable) (node *Node) {
 	node = &Node{
 		Id:         id,

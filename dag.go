@@ -476,8 +476,8 @@ func (dag *Dag) Start() bool {
 // Closing a channel on a receiver violates the general channel close principle.
 // However, when waitTilOver terminates, it seems safe to close the channel here because all tasks are finished.
 func (dag *Dag) WaitTilOver(ctx context.Context) bool {
-
 	defer close(dag.RunningStatus)
+
 	for {
 		if dag.bTimeout {
 			select {
@@ -586,6 +586,8 @@ func nodeExist(dag *Dag, nodeId string) (*Node, bool) {
 	return nil, false
 }
 
+// AddNodeToStartNode check
+// TODO 확인하자.
 func (dag *Dag) AddNodeToStartNode(to *Node) error {
 
 	if to == nil {
@@ -615,8 +617,8 @@ func (dag *Dag) AddNodeToStartNode(to *Node) error {
 		fromNode.childrenVertex = append(fromNode.childrenVertex, v)
 		toNode.parentVertex = append(toNode.parentVertex, v)
 	} else {
-		fmt.Println("error")
+		// TODO check
+		Log.Println("error")
 	}
-
 	return nil
 }
