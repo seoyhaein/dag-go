@@ -22,6 +22,7 @@ func xmlParser(x []*Node) (context.Context, bool, *Dag) {
 	}
 
 	n := len(x)
+	//TODO 일단 에러 때문에 이렇게 넣었지만, 이걸 외부로 빼야함.
 	runnable := cmd.Connect()
 	dag := NewDag(runnable)
 
