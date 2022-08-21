@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"time"
 
 	pbr "github.com/seoyhaein/podbridge"
 )
@@ -27,13 +28,7 @@ func DefaultImage() {
 }
 
 func (c *Container) RunE() error {
-	/*// TODO 바깥으로 빼자.
-	ctx, err := pbr.NewConnectionLinux(context.Background())
-	if err != nil {
-		panic(err)
-		//return 8, fmt.Errorf("check whether the podman-related dependencies and installation have been completed, " +
-		//	"and the Run API service (Podman system service) has been started")
-	}*/
+
 	/*
 		// TODO image 만들고 해야 함. 여기서 문제 발생할 듯 한데.. 흠..
 
@@ -115,7 +110,9 @@ func (c *Container) RunE() error {
 		v := int(result)
 		fmt.Println(v)*/
 	fmt.Println("connect")
-	return nil
+	time.Sleep(time.Second * 5)
+
+	return fmt.Errorf("test error")
 }
 
 /*func CreateCommand() *dag.Command {
@@ -128,17 +125,6 @@ func (c *Container) RunE() error {
 	}
 
 	return cmd
-}*/
-
-/*func InitCommand() (context.Context, error) {
-	ctx, err := pbr.NewConnectionLinux(context.Background())
-
-	if err != nil {
-		return nil, fmt.Errorf("check whether the podman-related dependencies and installation have been completed, " +
-			"and the Run API service (Podman system service) has been started")
-	}
-
-	return ctx, nil
 }*/
 
 // 혹시 참고  할수 있을지 검토

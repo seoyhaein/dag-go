@@ -18,10 +18,13 @@ func TestSimpleDag(t *testing.T) {
 	dag := NewDag(runnable)
 
 	// create dag
+	// 2번에 실패를 두고 테스트 진행하자.
 	dag.AddEdge(dag.startNode.Id, "1")
 	dag.AddEdge("1", "2")
-	dag.AddEdge("2", "3")
-	dag.AddEdge("3", "4")
+	dag.AddEdge("1", "3")
+	dag.AddEdge("1", "4")
+	dag.AddEdge("2", "5")
+	dag.AddEdge("5", "6")
 	// TODO 수정해야함.
 	dag.AddCommand("1", "", "")
 

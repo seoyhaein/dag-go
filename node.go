@@ -15,10 +15,10 @@ type Node struct {
 	parent    []*Node // parents
 	parentDag *Dag    // 자신이 소속되어 있는 Dag
 
-	commands       string
-	status         string
-	childrenVertex []chan int
-	parentVertex   []chan int
+	commands string
+	//status         string
+	childrenVertex []chan runningStatus
+	parentVertex   []chan runningStatus
 
 	runner func(ctx context.Context, n *Node, result chan *printStatus)
 
@@ -41,6 +41,9 @@ type Node struct {
 
 	// TODO 이름 추후 수정하자.
 	RunCommand Runnable
+
+	// 추가
+	succeed bool
 }
 
 // (do not erase) close 해주는 것 : func (dag *Dag) waitTilOver(ctx context.Context) bool  에서 defer close(dag.RunningStatus) 해줌
@@ -63,25 +66,31 @@ func setFunc(ctx context.Context, n *Node) {
 }
 
 func preFlight(ctx context.Context, n *Node) *printStatus {
-
 	if n == nil {
-		return &printStatus{PreflightFailed, noNodeId}
+		panic(fmt.Errorf("node is nil"))
+		//return &printStatus{PreflightFailed, noNodeId}
 	}
 	// 성공하면 context 사용한다.
 	eg, _ := errgroup.WithContext(ctx)
 	i := len(n.parentVertex) // 부모 채널의 수
 	for j := 0; j < i; j++ {
 		// (do not erase) 중요!! 여기서 들어갈 변수를 세팅않해주면 에러남.
-		j := j
-		c := n.parentVertex[j]
+		k := j
+		c := n.parentVertex[k]
 		eg.Go(func() error {
-			<-c
+			// TODO 여기서 처리하자.
+			result := <-c
+			if result == Failed {
+				return fmt.Errorf("failed")
+			}
 			return nil
 		})
 	}
 	if err := eg.Wait(); err == nil { // 대기
+		n.succeed = true
 		return &printStatus{Preflight, n.Id}
 	}
+	n.succeed = false
 	return &printStatus{PreflightFailed, noNodeId}
 }
 
@@ -108,9 +117,9 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 
 // TODO 특정 노드에서 실행 취소가 발생할 수 있도록 해야 한다.
 func inFlight(ctx context.Context, n *Node) *printStatus {
-
 	if n == nil {
-		return &printStatus{InFlightFailed, noNodeId}
+		panic(fmt.Errorf("node is nil"))
+		//return &printStatus{InFlightFailed, noNodeId}
 	}
 
 	if n.Id == StartNode {
@@ -126,9 +135,20 @@ func inFlight(ctx context.Context, n *Node) *printStatus {
 	if n.Id == StartNode || n.Id == EndNode {
 		bResult = true
 	} else { // TODO debug 모드때문에 넣어 놓았음. AddEdge 하면 commands. 안들어감. 추후 삭제하거나, 다른 방향으로 작성해야함.
-
-		n.RunCommand.RunE()
 		fmt.Println(n.Id)
+
+		// 성골할때만 명령을 실행시키고, 실패할경우는 채널에 값만 흘려 보낸다.
+		if n.succeed {
+			err := n.RunCommand.RunE()
+
+			if err != nil {
+				fmt.Println("실패")
+				bResult = false
+				n.succeed = false
+			} else {
+				n.succeed = true
+			}
+		}
 
 		/*if len(strings.TrimSpace(n.commands)) == 0 {
 			fmt.Println(n.Id)
@@ -151,21 +171,30 @@ func inFlight(ctx context.Context, n *Node) *printStatus {
 }
 
 func postFlight(ctx context.Context, n *Node) *printStatus {
-
 	if n == nil {
-		return &printStatus{PostFlightFailed, noNodeId}
-	}
-
-	k := len(n.childrenVertex)
-	for j := 0; j < k; j++ {
-		c := n.childrenVertex[j]
-		c <- 1
-		close(c)
+		panic(fmt.Errorf("node is nil"))
+		//return &printStatus{PostFlightFailed, noNodeId}
 	}
 
 	if n.Id == EndNode {
 		return &printStatus{FlightEnd, n.Id}
 	}
+
+	k := len(n.childrenVertex)
+	if n.succeed {
+		for j := 0; j < k; j++ {
+			c := n.childrenVertex[j]
+			c <- Succeed
+			close(c)
+		}
+	} else {
+		for j := 0; j < k; j++ {
+			c := n.childrenVertex[j]
+			c <- Failed
+			close(c)
+		}
+	}
+
 	return &printStatus{PostFlight, n.Id}
 }
 
@@ -214,8 +243,8 @@ func getNextNode(n *Node) *Node {
 // 만약 circle 이면 무한루프 돔. (1,3), (3,1)
 // visited 를 분리 해야 할까??
 // cycle 이면 true, cycle 이 아니면 false
-
 // TODO 여기서 deepcopy 하는데 이거 정리하자. dag_test.go 에서 에러나는 거 찾아서 해결하자.
+// cloneGraph
 func cloneGraph(ns map[string]*Node) (map[string]*Node, bool) {
 
 	if ns == nil {
@@ -329,8 +358,7 @@ func cloneGraph(ns map[string]*Node) (map[string]*Node, bool) {
 
 // TODO 내일 수정하자. func CreateCommand(n *Node, r Runnable) *Command -> command.go- 참고
 // TODO node 에 명령어 등 넣고 생성하는 메서드
-// (dag *Dag) createNode(id string) *Node  에 들어가는데 상위 노출 되는 시점을 찾아서 외부 노출 방안을 고민해보자.
-
+// createNode(id string) *Node  에 들어가는데 상위 노출 되는 시점을 찾아서 외부 노출 방안을 고민해보자.
 func createNode(id string, r Runnable) (node *Node) {
 	node = &Node{
 		Id:         id,
@@ -339,14 +367,14 @@ func createNode(id string, r Runnable) (node *Node) {
 	return
 }
 
-// add by seoy
-
+// Execute add by seoy
 func (n *Node) Execute() (err error) {
 
 	err = execute(n)
 	return
 }
 
+// execute add by seoy
 func execute(this *Node) error {
 	err := this.RunCommand.RunE()
 	return err

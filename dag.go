@@ -39,7 +39,7 @@ type Dag struct {
 type Edge struct {
 	parentId string
 	childId  string
-	vertex   chan int
+	vertex   chan runningStatus
 }
 
 // TODO 함 수호출 순서 정하자. 추후 생각하자.
@@ -49,6 +49,7 @@ type callOrder struct {
 // NewDag creates a pointer to the Dag structure.
 // One channel must be put in the start node. Enter this channel value in the start function.
 // And this channel is not included in Edge.
+// TODO 파라미터 nil 허용해주도록 바꿔줄지 생각함.
 func NewDag(r Runnable) *Dag {
 	dag := new(Dag)
 	dag.nodes = make(map[string]*Node)
@@ -63,7 +64,7 @@ func NewDag(r Runnable) *Dag {
 	}
 	// 시작노드는 반드시 하나의 채널을 넣어 줘야 한다.
 	// start 함수에서 채널 값을 넣어준다.
-	dag.startNode.parentVertex = append(dag.startNode.parentVertex, make(chan int, 1))
+	dag.startNode.parentVertex = append(dag.startNode.parentVertex, make(chan runningStatus, Min))
 
 	// TODO 일단 퍼퍼를 1000 으로 둠
 	// TODO n 을 향후에는 조정하자. 각 노드의 수로 채널 버퍼를 지정할 수 없다. 또한 그럴 필요도 없을 수도 있다.
@@ -90,7 +91,7 @@ func NewDagWithPId(pid string, n string, r Runnable) *Dag {
 	}
 	// 시작노드는 반드시 하나의 채널을 넣어 줘야 한다.
 	// start 함수에서 채널 값을 넣어준다.
-	dag.startNode.parentVertex = append(dag.startNode.parentVertex, make(chan int, 1))
+	dag.startNode.parentVertex = append(dag.startNode.parentVertex, make(chan runningStatus, Min))
 
 	// TODO 일단 퍼퍼를 1000 으로 둠
 	// TODO n 을 향후에는 조정하자. 각 노드의 수로 채널 버퍼를 지정할 수 없다. 또한 그럴 필요도 없을 수도 있다.
@@ -115,7 +116,7 @@ func (dag *Dag) createEdge(parentId, childId string) (*Edge, createEdgeErrorType
 				cm := new(Edge)
 				cm.parentId = v.parentId
 				cm.childId = childId
-				cm.vertex = make(chan int, 1)
+				cm.vertex = make(chan runningStatus, Min)
 
 				dag.Edges = append(dag.Edges, cm)
 
@@ -126,7 +127,7 @@ func (dag *Dag) createEdge(parentId, childId string) (*Edge, createEdgeErrorType
 				cm := new(Edge)
 				cm.parentId = parentId
 				cm.childId = v.childId
-				cm.vertex = make(chan int, 1)
+				cm.vertex = make(chan runningStatus, Min)
 
 				dag.Edges = append(dag.Edges, cm)
 
@@ -135,7 +136,7 @@ func (dag *Dag) createEdge(parentId, childId string) (*Edge, createEdgeErrorType
 				cm := new(Edge)
 				cm.parentId = parentId
 				cm.childId = childId
-				cm.vertex = make(chan int, 1)
+				cm.vertex = make(chan runningStatus, Min)
 
 				dag.Edges = append(dag.Edges, cm)
 
@@ -147,14 +148,14 @@ func (dag *Dag) createEdge(parentId, childId string) (*Edge, createEdgeErrorType
 	cm := new(Edge)
 	cm.parentId = parentId
 	cm.childId = childId
-	cm.vertex = make(chan int, 1)
+	cm.vertex = make(chan runningStatus, Min)
 
 	dag.Edges = append(dag.Edges, cm)
 
 	return cm, Create
 }
 
-func (dag *Dag) getVertex(parentId, childId string) chan int {
+func (dag *Dag) getVertex(parentId, childId string) chan runningStatus {
 
 	for _, v := range dag.Edges {
 		if v.parentId == parentId {
@@ -175,6 +176,7 @@ func (dag *Dag) getVertex(parentId, childId string) chan int {
 	따라서, channel 의 수는 node 의 갯수와 밀접한 관련이 있다.
 	이를 토대로 관련 메서드가 제작되었다.
 */
+// TODO 생성된 edge 를 계산해본다.
 func (dag *Dag) checkEdges() bool {
 	return false
 }
@@ -305,6 +307,8 @@ func (dag *Dag) FinishDag() error {
 	}
 
 	dag.endNode = dag.createNode(EndNode)
+	//TODO check add by seoy
+	dag.endNode.succeed = true
 	for _, n := range temp {
 		if len(n.children) == 0 && len(n.parent) == 0 {
 			if len(temp) == 1 {
@@ -457,9 +461,10 @@ func (dag *Dag) Start() bool {
 		return false
 	}
 
-	go func(c chan int) {
+	dag.startNode.succeed = true
+	go func(c chan runningStatus) {
 		ch := c
-		ch <- 1
+		ch <- Start
 		// add by seoy, channel closing principle
 		close(ch)
 	}(dag.startNode.parentVertex[0])
@@ -523,10 +528,9 @@ func (dag *Dag) WaitTilOver(ctx context.Context) bool {
 
 }
 
-// TODO context cancel 관련 해서 추가 해줘야 하고 start() 같은 경우도 처리 해줘야 한다.
+//printRunningStatus TODO context cancel 관련 해서 추가 해줘야 하고 start() 같은 경우도 처리 해줘야 한다.
 // 약간 이상한 모양인 데이걸 처리하는
 // TODO 나중에 수정해주자.
-
 func printRunningStatus(status *printStatus) {
 	if status == nil {
 		return

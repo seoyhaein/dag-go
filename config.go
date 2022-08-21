@@ -20,13 +20,16 @@ const (
 
 // The status displayed when running the runner on each node.
 const (
-	Preflight runningStatus = iota
+	Start runningStatus = iota
+	Preflight
 	PreflightFailed
 	InFlight
 	InFlightFailed
 	PostFlight
 	PostFlightFailed
 	FlightEnd
+	Failed
+	Succeed
 )
 
 const (
@@ -45,3 +48,9 @@ const (
 
 //It is the node ID when the condition that the node cannot be created.
 const noNodeId = "-1"
+
+// channel buffer size
+const (
+	Max int = 100
+	Min int = 1
+)
