@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/seoyhaein/utils/shellexecmd"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -32,13 +31,16 @@ type Node struct {
 	context.Context
 
 	// TODO commands 복수로 할지 하나로 할지는 고민한다.
-	cmd []*Command
-	c   *Command
+	/*cmd []*Command
+	c   *Command*/
 
 	// 추후 commands string 과 교체
 	bashCommand []string
 	// 컨테이너 빌드를 위한 from 이미지.
 	ImageName string
+
+	// TODO 이름 추후 수정하자.
+	RunCommand Runnable
 }
 
 // (do not erase) close 해주는 것 : func (dag *Dag) waitTilOver(ctx context.Context) bool  에서 defer close(dag.RunningStatus) 해줌
@@ -124,7 +126,11 @@ func inFlight(ctx context.Context, n *Node) *printStatus {
 	if n.Id == StartNode || n.Id == EndNode {
 		bResult = true
 	} else { // TODO debug 모드때문에 넣어 놓았음. AddEdge 하면 commands. 안들어감. 추후 삭제하거나, 다른 방향으로 작성해야함.
-		if len(strings.TrimSpace(n.commands)) == 0 {
+
+		n.RunCommand.RunE()
+		fmt.Println(n.Id)
+
+		/*if len(strings.TrimSpace(n.commands)) == 0 {
 			fmt.Println(n.Id)
 			// TODO command 추가
 			if n.c != nil {
@@ -133,7 +139,8 @@ func inFlight(ctx context.Context, n *Node) *printStatus {
 			bResult = true
 		} else {
 			bResult = shellexecmd.Runner(n.commands)
-		}
+		}*/
+
 	}
 
 	if bResult {
@@ -320,20 +327,27 @@ func cloneGraph(ns map[string]*Node) (map[string]*Node, bool) {
 	n.c = cmd
 }*/
 
-// TODO 내일 수정하자. func CreateCommand(n *Node, r Runnable) *Command -> command.go 참고
+// TODO 내일 수정하자. func CreateCommand(n *Node, r Runnable) *Command -> command.go- 참고
 // TODO node 에 명령어 등 넣고 생성하는 메서드
 // (dag *Dag) createNode(id string) *Node  에 들어가는데 상위 노출 되는 시점을 찾아서 외부 노출 방안을 고민해보자.
-func createNode(id string) (node *Node) {
+
+func createNode(id string, r Runnable) (node *Node) {
 	node = &Node{
-		Id: id,
-		c:  new(Command),
+		Id:         id,
+		RunCommand: r,
 	}
-	node.c.this = node
 	return
 }
 
-func CreateNode(id string, r Runnable) *Node {
+// add by seoy
 
-	createNode(id)
-	return nil
+func (n *Node) Execute() (err error) {
+
+	err = execute(n)
+	return
+}
+
+func execute(this *Node) error {
+	err := this.RunCommand.RunE()
+	return err
 }

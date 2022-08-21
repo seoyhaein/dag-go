@@ -1,16 +1,15 @@
 package dag_go
 
-import "fmt"
-
 // interface 로 만들자.
 type Command struct {
 	// TODO 입력 파라미터를 넣을지는 고민하고 일단 지운다.
 	//RunE func(args []string) error
 	this *Node
-	RunE func(n *Node) error
+	//RunE func(n *Node) error
+	//RunE func() error
 }
 
-func (c *Command) Execute() (err error) {
+/*func (c *Command) Execute() (err error) {
 	if c.this == nil {
 		return fmt.Errorf("node's pointer is not set")
 	}
@@ -19,11 +18,14 @@ func (c *Command) Execute() (err error) {
 }
 
 func (c *Command) execute(this *Node) (err error) {
-	err = c.RunE(this)
-	return
-}
+	this.RunCommand.RunE()
 
-func CreateCommand(n *Node, r Runnable) *Command {
+	//err = c.RunE()
+	//err = c.RunE(this)
+	return
+}*/
+
+/*func CreateCommand(n *Node, r Runnable) *Command {
 	if n == nil {
 		return nil
 	}
@@ -35,7 +37,7 @@ func CreateCommand(n *Node, r Runnable) *Command {
 		return r.RunE(n)
 	}
 	return cmd
-}
+}*/
 
 /*func (c *Command) Set(f func() error) {
 
@@ -45,7 +47,3 @@ func CreateCommand(n *Node, r Runnable) *Command {
 	}
 	c.RunE = g
 }*/
-
-type Runnable interface {
-	RunE(*Node) error
-}

@@ -28,6 +28,11 @@ type Dag struct {
 	// timeout
 	Timeout  time.Duration
 	bTimeout bool
+
+	//cmd *Command
+
+	// TODO 이름 추후 수정하자.
+	RunCommand Runnable
 }
 
 // Edge is a channel. It has the same meaning as the connecting line connecting the parent and child nodes.
@@ -44,7 +49,7 @@ type callOrder struct {
 // NewDag creates a pointer to the Dag structure.
 // One channel must be put in the start node. Enter this channel value in the start function.
 // And this channel is not included in Edge.
-func NewDag() *Dag {
+func NewDag(r Runnable) *Dag {
 	dag := new(Dag)
 	dag.nodes = make(map[string]*Node)
 	dag.Id = uuid.NewString()
@@ -64,14 +69,18 @@ func NewDag() *Dag {
 	// TODO n 을 향후에는 조정하자. 각 노드의 수로 채널 버퍼를 지정할 수 없다. 또한 그럴 필요도 없을 수도 있다.
 	dag.RunningStatus = make(chan *printStatus, 1000)
 
+	// TODO 일단 간단히 넣었음.
+	dag.RunCommand = r
+
 	return dag
 }
 
-func NewDagWithPId(pid string, n string) *Dag {
+func NewDagWithPId(pid string, n string, r Runnable) *Dag {
 	dag := new(Dag)
 	dag.nodes = make(map[string]*Node)
 	dag.Id = fmt.Sprintf("%s-%s", pid, n)
 	dag.validated = false
+
 	dag.startNode = dag.createNode(StartNode)
 
 	// 시작할때 넣어주는 채널 여기서 세팅된다.
@@ -179,10 +188,7 @@ func (dag *Dag) createNode(id string) *Node {
 		}
 	}
 	// TODO 추가적으로 수정할 예정임.
-	node := createNode(id)
-
-	// TODO add command 버그 존재할 수 있음, 추후 수정할 예정임.
-	//node.AddCommandT()
+	node := createNode(id, dag.RunCommand)
 
 	node.parentDag = dag
 	dag.nodes[id] = node
