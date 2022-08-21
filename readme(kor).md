@@ -291,10 +291,11 @@ xml 에서 파싱을 해서 가져오는 것은 가능하다. 다음으로, 처�
 10. detectCycle, cloneGraph 버그 수정
 11. https://hanpama.dev/posts/golang-org-x-sync
 13. addedge 등 여러 메서들의 error 를 어떻게 관리할지 고민. - 일단 구현했는지 생각을 해봐야 할듯.
-14. api 호출 순서 및 조정 필요.
+14. api 호출 순서 및 조정 필요. 
 15. time.duration 이 전역적으로 적용되고 적용된 값에서 전체적으로 감소하여서 적용될 수 있도록 한다.
 16. xml 형식 정의 해놓는다.
-17. 8/6 까지 dag.go 에서 xml 관련 통합 완료 할 것.
+17. 8/6 까지 dag.go 에서 xml 관련 통합 완료 할 것. - 완료
+18. 로그기록 stdin, stdout, stderr
 
 
 ### Done
