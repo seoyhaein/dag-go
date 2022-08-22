@@ -219,7 +219,7 @@ func (Res *CreateContainerResult) HealthCheck(ctx context.Context, interval stri
 					containerData, err = containers.Inspect(ctx, res.ID, &containerInspectOptions)
 					if err != nil {
 						fmt.Println(err.Error())
-						res.ch <- unKnown
+						res.ch <- UnKnown
 						close(res.ch)
 						return
 					}
@@ -271,8 +271,8 @@ func (Res *CreateContainerResult) Run(ctx context.Context, interval string) <-ch
 			if c == Healthy {
 				out <- Healthy
 			}
-			if c == unKnown {
-				out <- unKnown
+			if c == UnKnown {
+				out <- UnKnown
 			}
 			if c == Exited {
 				out <- Exited
@@ -283,7 +283,7 @@ func (Res *CreateContainerResult) Run(ctx context.Context, interval string) <-ch
 			if c == Paused {
 				out <- Paused
 			}
-			out <- none
+			out <- None
 		}
 	}(Res.ch, out)
 
@@ -304,8 +304,8 @@ func (Res *CreateContainerResult) RunT(ctx context.Context, interval string) Con
 		/*if c == Healthy {
 			return Healthy
 		}*/
-		if c == unKnown {
-			return unKnown
+		if c == UnKnown {
+			return UnKnown
 		}
 		if c == Exited {
 			return Exited
@@ -317,7 +317,7 @@ func (Res *CreateContainerResult) RunT(ctx context.Context, interval string) Con
 			return Paused
 		}*/
 	}
-	return none
+	return None
 }
 
 // 이미지 가존재하는지 확인하는 메서드 빼놓자.

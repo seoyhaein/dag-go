@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/seoyhaein/dag-go/cmd"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -14,7 +13,7 @@ import (
 func TestSimpleDag(t *testing.T) {
 	assert := assert.New(t)
 
-	runnable := cmd.Connect()
+	runnable := Connect()
 	dag := NewDag(runnable)
 
 	// create dag

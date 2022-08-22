@@ -133,15 +133,15 @@ func (podConf *PodConfig) createSpecPodNameAndHost() {
 type ContainerStatus int
 
 const (
-	Created ContainerStatus = iota
-	Running
-	Exited
-	Healthy
-	Unhealthy
-	Dead
-	Paused
-	unKnown
-	none
+	Created   ContainerStatus = iota //0
+	Running                          // 1
+	Exited                           // 2
+	Healthy                          // 3
+	Unhealthy                        // 4
+	Dead                             // 5
+	Paused                           // 6
+	UnKnown                          // 7
+	None                             // 8
 )
 
 // channel buffer size

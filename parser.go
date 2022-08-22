@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
-	"github.com/seoyhaein/dag-go/cmd"
 	"io"
 )
 
@@ -23,7 +22,7 @@ func xmlParser(x []*Node) (context.Context, bool, *Dag) {
 
 	n := len(x)
 	//TODO 일단 에러 때문에 이렇게 넣었지만, 이걸 외부로 빼야함.
-	runnable := cmd.Connect()
+	runnable := Connect()
 	dag := NewDag(runnable)
 
 	if n >= 1 { // node 가 최소 하나 이상은 있어야 한다.
