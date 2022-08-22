@@ -273,7 +273,7 @@ func toListCreated() (*ListCreated, error) {
 	lc = new(ListCreated)
 	lc.mutex = new(sync.Mutex)
 	// 파일이 없을때
-	if b, err = utils.FileExists(podbridgePath); b == false {
+	if b, _, err = utils.FileExists(podbridgePath); b == false {
 		f := createPodbridgeYaml()
 		if f == nil {
 			return nil, err
@@ -351,7 +351,7 @@ func createPodbridgeYaml() *os.File {
 // Reset truncate podbridge.yaml
 // ListCreated 를 리셋하는 것은 생각해볼 것
 func Reset() error {
-	b, err := utils.FileExists(podbridgePath)
+	b, _, err := utils.FileExists(podbridgePath)
 	if err != nil {
 		return err
 	}

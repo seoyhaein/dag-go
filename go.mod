@@ -6,7 +6,7 @@ require (
 	github.com/containers/buildah v1.27.0
 	github.com/containers/image/v5 v5.22.0
 	github.com/google/uuid v1.3.0
-	github.com/seoyhaein/podbridge v0.0.0-20220821063947-ec11863a0e43
+	github.com/seoyhaein/podbridge v0.0.0-20220822112106-93cce9f9e41c
 	github.com/seoyhaein/utils v0.0.0-20220822095725-437bdac169f9
 	github.com/sirupsen/logrus v1.9.0
 	github.com/stretchr/testify v1.8.0

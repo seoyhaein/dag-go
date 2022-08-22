@@ -29,6 +29,7 @@ import (
 // 모두 지우기
 // podman rmi --force -a
 
+// TODO import cycle 해결해야함. pbr 빼버리자. 밖으로...
 var (
 	digester = digest.Canonical.Digester()
 	log      = pbr.Log

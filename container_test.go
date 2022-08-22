@@ -9,8 +9,13 @@ func TestGenExecutorSh(t *testing.T) {
 	fileName := "executor.sh"
 	cmd := `echo "hello world"`
 
-	_, err := genExecutorSh(path, fileName, cmd)
+	_, _, err := genExecutorSh(path, fileName, cmd)
 	if err != nil {
 		t.Fail()
 	}
+}
+
+func TestCreateCustomImage(t *testing.T) {
+	cmd := `echo "hello world"`
+	CreateCustomImage(",", ".", "test001", cmd)
 }

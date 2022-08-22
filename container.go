@@ -33,12 +33,12 @@ func Connect() *Container {
 // "./healthcheck/executor.sh"
 // "./healthcheck/healthcheck.sh"
 
-// DefaultImage alpine 으로 만들어주고 명령어를 넣어줘서 image 를 만들어 주는 function.
+// CreateCustomImage alpine 으로 만들어주고 명령어를 넣어줘서 image 를 만들어 주는 function.
 // 1. bash, nano 와 업데이트를 해줌.
 // 2. /app 폴더를 WorkDir 로 만들어줌.
 // 3. /app/healthcheck 폴더를 만들어줌.
 // 4. /app/healthcheck 여기에 executor.sh 를 집어 넣어줌.
-func DefaultImage(exePath, healthCheckerPath, imageName, cmd string) *string {
+func CreateCustomImage(exePath, healthCheckerPath, imageName, cmd string) *string {
 	if utils.IsEmptyString(exePath) || utils.IsEmptyString(healthCheckerPath) || utils.IsEmptyString(imageName) {
 		return nil
 	}
@@ -76,7 +76,9 @@ func DefaultImage(exePath, healthCheckerPath, imageName, cmd string) *string {
 	}
 	// ADD/Copy 동일함.
 	// executor.sh 추가 해줌.
-	err = builder.Add(exePath, "/app/healthcheck")
+	_, executorPath, _ := genExecutorSh(exePath, "executor.sh", cmd)
+	//executorPath := fmt.Sprintf("%s/executor.sh", exePath)
+	err = builder.Add(*executorPath, "/app/healthcheck")
 	if err != nil {
 		Log.Println("Add error")
 		panic(err)
@@ -107,26 +109,25 @@ func DefaultImage(exePath, healthCheckerPath, imageName, cmd string) *string {
 
 // genExecutorSh 동일한 위치에 파일이 있으면 실패한다.
 // TODO performance test 하자.
-func genExecutorSh(path, fileName, cmd string) (*os.File, error) {
+func genExecutorSh(path, fileName, cmd string) (*os.File, *string, error) {
 	if utils.IsEmptyString(path) || utils.IsEmptyString(fileName) {
-		return nil, fmt.Errorf("path or file name is empty")
+		return nil, nil, fmt.Errorf("path or file name is empty")
 	}
-
 	var (
 		f   *os.File
 		err error
 	)
-
 	defer func() {
 		if err = f.Close(); err != nil {
 			panic(err)
 		}
 	}()
-
-	b, _, err := utils.FileExists(path)
-	if err != nil {
+	executorPath := fmt.Sprintf("%s/%s", path, fileName)
+	b, _, err := utils.FileExists(executorPath)
+	// TODO github 때문에 주석 달아놈 시간 지나면 풀자.
+	/*if err != nil {
 		panic(err)
-	}
+	}*/
 	// 해당 위치에 파일이 없다면
 	if b == false {
 		f, err = os.Create(fileName)
@@ -149,13 +150,12 @@ echo "exit:"$? | tee ./log
 		f.Write(sh)
 		f.Sync()
 
-		return f, nil
+		return f, &executorPath, nil
 	}
-
-	return nil, fmt.Errorf("cannot create file")
+	return nil, nil, fmt.Errorf("cannot create file")
 }
 
-func (c *Container) RunE(d *Dag) error {
+func (c *Container) RunE() error {
 
 	/*
 			// TODO image 만들고 해야 함. 여기서 문제 발생할 듯 한데.. 흠..
