@@ -9,7 +9,7 @@ import (
 )
 
 type Runnable interface {
-	RunE() error
+	RunE(d *Dag) error
 }
 
 type Pipeline struct {

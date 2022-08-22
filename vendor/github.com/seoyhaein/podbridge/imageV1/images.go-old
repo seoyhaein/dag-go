@@ -1,0 +1,252 @@
+package podbridge
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
+	"github.com/containers/buildah"
+	"github.com/containers/buildah/define"
+	is "github.com/containers/image/v5/storage"
+	"github.com/containers/image/v5/types"
+	"github.com/containers/storage"
+	"github.com/containers/storage/pkg/unshare"
+	"github.com/opencontainers/go-digest"
+	"github.com/seoyhaein/utils"
+	"github.com/sirupsen/logrus"
+)
+
+// TODO 읽어보자
+// https://medium.com/goingogo/why-use-testmain-for-testing-in-go-dafb52b406bc
+
+// images.go 의 역활은 기존 image 에 데이터를 넣는 역활로 한정하자.
+// 환경설정이라던지 기타 세부적인 세팅들은 기본이미지에서 처리하고 여기에 data 만을 넣은 역활로 한정시키는것이 타당 할것 같다.
+
+var (
+	digester = digest.Canonical.Digester()
+	log      = logrus.New()
+
+	// 일단 넣어 놓음
+	Verbose = true
+	Debug   = true
+)
+
+type (
+	BuildAdd struct {
+		From string
+		To   string
+	}
+
+	BuildCommand struct {
+		Command string
+		Wd      string
+	}
+)
+
+func Add(builder *buildah.Builder, adds ...BuildAdd) error {
+	for _, add := range adds {
+		log.Infof("Copying into container image %s to %s", add.From, add.To)
+		err := builder.Add(add.To, false, buildah.AddAndCopyOptions{Hasher: digester.Hash()}, add.From)
+		if err != nil {
+			return fmt.Errorf("error while adding: %v", err)
+		}
+	}
+	return nil
+}
+
+func RunCommands(builder *buildah.Builder, commands ...BuildCommand) error {
+	logger := GetLoggerWriter()
+	runOptions := buildah.RunOptions{
+		Stdout:    logger,
+		Stderr:    logger,
+		Isolation: define.IsolationChroot,
+	}
+	for _, cmd := range commands {
+		log.Infof("Running command %s in directory %s", cmd.Command, cmd.Wd)
+
+		command := strings.Split(cmd.Command, " ")
+
+		if cmd.Wd != "" {
+			runOptions.WorkingDir = cmd.Wd
+		}
+
+		if err := builder.Run(command, runOptions); err != nil {
+			return fmt.Errorf("error while runnning command: %v", err)
+		}
+	}
+	return nil
+}
+
+// add
+func GetLoggerWriter() io.Writer {
+	if Verbose || Debug {
+		return os.Stdout
+	} else {
+		return NopLogger{}
+	}
+}
+
+type NopLogger struct{}
+
+func (n NopLogger) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+/*func CommitImage(builder *buildah.Builder, ctx *types.SystemContext, imageName string, imageTag string) (image.FunctionImage, error) {
+	img := image.FunctionImage{
+		ImageName: imageName,
+		Tag:       imageTag,
+	}
+
+	imageRef, err := img.ParseSpecDest()
+
+	if err != nil {
+		return image.FunctionImage{}, err
+	}
+
+	_, _, _, err = builder.Commit(context.TODO(), imageRef, buildah.CommitOptions{
+		PreferredManifestType: buildah.Dockerv2ImageManifest,
+		SystemContext:         ctx,
+	})
+
+	return img, err
+}*/
+
+type PreBuilderOption struct {
+	storage.Store
+	*buildah.BuilderOptions
+	//*buildah.Builder
+
+	ErrorMessage error
+}
+
+// TODO 향후 다른 방향으로 생각하자 일단 이것은 남겨두되 사용하지 않는다.
+func BeforeMainStartup() {
+	if buildah.InitReexec() {
+		return
+	}
+	unshare.MaybeReexecUsingUserNamespace(false)
+}
+
+func NewBuildImage(fromImage string) *PreBuilderOption {
+
+	preBuilderOption := new(PreBuilderOption)
+
+	buildStoreOptions, err := storage.DefaultStoreOptions(unshare.IsRootless(), unshare.GetRootlessUID())
+
+	if err != nil {
+		preBuilderOption.Store = nil
+		preBuilderOption.BuilderOptions = nil
+		//newBuildImage.Builder = nil
+		preBuilderOption.ErrorMessage = err
+
+		return preBuilderOption
+	}
+
+	buildStore, err := storage.GetStore(buildStoreOptions)
+
+	if err != nil {
+		preBuilderOption.Store = nil
+		preBuilderOption.BuilderOptions = nil
+		//newBuildImage.Builder = nil
+		preBuilderOption.ErrorMessage = err
+
+		return preBuilderOption
+	}
+
+	preBuilderOption.Store = buildStore
+
+	if utils.IsEmptyString(fromImage) {
+		preBuilderOption.BuilderOptions = nil
+		//newBuildImage.Builder = nil
+		preBuilderOption.ErrorMessage = errors.New("there is no image name")
+
+		return preBuilderOption
+	}
+	// TODO 수정해야 함. 다른 옵션들도 담을 수 있는 방향으로 개선해야 함.
+	builderOption := new(buildah.BuilderOptions)
+	builderOption.FromImage = fromImage
+	preBuilderOption.BuilderOptions = builderOption
+
+	//builder, err := buildah.NewBuilder(ctx, store, *options)
+
+	return preBuilderOption
+}
+
+// 기존 fromImage 에서 데이터만 넣는 것.
+func NewBuildImageWithFiles(fromImage string) *PreBuilderOption {
+	return nil
+}
+
+func (pbo *PreBuilderOption) NewBuilder(ctx context.Context) (*buildah.Builder, error) {
+
+	if pbo.ErrorMessage != nil {
+		return nil, fmt.Errorf("NewBuildImage error")
+	}
+
+	builder, err := buildah.NewBuilder(ctx, pbo.Store, *pbo.BuilderOptions)
+
+	err = builder.Add("/home/node/", false, buildah.AddAndCopyOptions{}, "script.js")
+
+	return builder, err
+}
+
+func (pbo *PreBuilderOption) DeleteAndShutdown(builder *buildah.Builder) error {
+	_, err := pbo.Store.Shutdown(false)
+
+	if err != nil {
+		return err
+	}
+
+	if builder == nil {
+		errors.New("invalid builder, builder is nil ")
+	}
+	err = builder.Delete()
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// 특수한 용도로만 사용된다.
+// repository 는 이미지 이름 ex> docker.io/busybox
+// TODO 시나리오를 생각하자.
+// 임시로 일단 이렇게 하자.
+
+func BuildCustomImage(ctx context.Context, builder *buildah.Builder, store storage.Store, repository string) (*string, error) {
+
+	imageRef, err := is.Transport.ParseStoreReference(store, repository)
+	if err != nil {
+		return nil, err
+	}
+
+	imageId, _, _, err := builder.Commit(ctx, imageRef, buildah.CommitOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return &imageId, nil
+
+}
+
+// preferredManifestType : buildah.Dockerv2ImageManifest , buildah.OCIv1ImageManifest
+
+func CommitImageA(ctx context.Context, builder *buildah.Builder, preferredManifestType string, sysctx *types.SystemContext, store storage.Store, repository string) (*string, error) {
+
+	imageRef, err := is.Transport.ParseStoreReference(store, repository)
+	if err != nil {
+		return nil, err
+	}
+
+	imageId, _, _, err := builder.Commit(ctx, imageRef, buildah.CommitOptions{
+		PreferredManifestType: preferredManifestType,
+		SystemContext:         sysctx,
+	})
+
+	return &imageId, err
+}
