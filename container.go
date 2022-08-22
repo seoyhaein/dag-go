@@ -105,7 +105,8 @@ func DefaultImage(exePath, healthCheckerPath, imageName, cmd string) *string {
 	return image
 }
 
-//genExecutorSh 동일한 위치에 파일이 있으면 실패한다.
+// genExecutorSh 동일한 위치에 파일이 있으면 실패한다.
+// TODO performance test 하자.
 func genExecutorSh(path, fileName, cmd string) (*os.File, error) {
 	if utils.IsEmptyString(path) || utils.IsEmptyString(fileName) {
 		return nil, fmt.Errorf("path or file name is empty")
@@ -152,25 +153,6 @@ echo "exit:"$? | tee ./log
 	}
 
 	return nil, fmt.Errorf("cannot create file")
-}
-
-func createPodbridgeYaml() *os.File {
-	var (
-		f   *os.File
-		err error
-	)
-
-	defer func() {
-		if err = f.Close(); err != nil {
-			panic(err)
-		}
-	}()
-
-	f, err = os.Create("podbridge.yaml")
-	if err != nil {
-		return nil
-	}
-	return f
 }
 
 func (c *Container) RunE(d *Dag) error {
