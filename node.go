@@ -52,7 +52,7 @@ type Node struct {
 
 // (do not erase) close 해주는 것 : func (dag *Dag) waitTilOver(ctx context.Context) bool  에서 defer close(dag.RunningStatus) 해줌
 // (do not erase) 너무 중요.@@@@ 채널 close 방식 확인하자. https://go101.org/article/channel-closing.html 너무 좋은 자료. 왜 제목을 101 이라고 했지 중급이상인데.
-
+// TODO 버그 있음. 수정해야함.
 func setFunc(ctx context.Context, n *Node) {
 	n.runner = func(ctx context.Context, n *Node, result chan *printStatus) {
 		//defer close(result)
@@ -146,7 +146,7 @@ func inFlight(ctx context.Context, n *Node) *printStatus {
 
 		// 성골할때만 명령을 실행시키고, 실패할경우는 채널에 값만 흘려 보낸다.
 		if n.succeed {
-			err := n.RunCommand.RunE()
+			err := n.RunCommand.RunE(n.ImageName)
 
 			if err != nil {
 				Log.Println("실패")
@@ -339,6 +339,7 @@ func createNode(id string, r Runnable) (node *Node) {
 	return
 }
 
+// 사용하지 않음.
 // Execute add by seoy
 func (n *Node) Execute() (err error) {
 
@@ -348,6 +349,6 @@ func (n *Node) Execute() (err error) {
 
 // execute add by seoy
 func execute(this *Node) error {
-	err := this.RunCommand.RunE()
+	err := this.RunCommand.RunE(this.ImageName)
 	return err
 }

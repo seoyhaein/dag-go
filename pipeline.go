@@ -9,7 +9,7 @@ import (
 )
 
 type Runnable interface {
-	RunE() error
+	RunE(imageName string) error
 }
 
 type Pipeline struct {

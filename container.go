@@ -25,7 +25,7 @@ func Connect() *Container {
 	}
 }
 
-func (c *Container) RunE() error {
+func (c *Container) RunE(imageName string) error {
 
 	/*
 			// TODO image 만들고 해야 함. 여기서 문제 발생할 듯 한데.. 흠..
