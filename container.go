@@ -7,6 +7,8 @@ import (
 )
 
 // TODO buildah, types 는 imageV1 과 podbridge 에서 해결해줘야 함.
+// 혹시 참고  할수 있을지 검토
+// https://stackoverflow.com/questions/48263281/how-to-find-sshd-service-status-in-golang
 
 type Container struct {
 	context context.Context
@@ -56,6 +58,3 @@ func createContainer(ctx context.Context, n *Node) int {
 	v := int(result)
 	return v
 }
-
-// 혹시 참고  할수 있을지 검토
-// https://stackoverflow.com/questions/48263281/how-to-find-sshd-service-status-in-golang
