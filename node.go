@@ -10,52 +10,38 @@ import (
 
 type Node struct {
 	Id string
+	// 컨테이너 빌드를 위한 from 이미지.
+	ImageName string
+	// TODO 이름 추후 수정하자.
+	RunCommand Runnable
 
 	children  []*Node // children
 	parent    []*Node // parents
 	parentDag *Dag    // 자신이 소속되어 있는 Dag
-
-	commands string
+	commands  string
 	//status         string
 	childrenVertex []chan runningStatus
 	parentVertex   []chan runningStatus
-
-	runner func(ctx context.Context, n *Node, result chan *printStatus)
-
+	runner         func(ctx context.Context, n *Node, result chan *printStatus)
 	// for xml parsing
 	from []string
 	to   []string
-
 	// TODO re-thinking
 	// https://yoongrammer.tistory.com/36
 	context.Context
-
-	// TODO commands 복수로 할지 하나로 할지는 고민한다.
-	/*cmd []*Command
-	c   *Command*/
-
 	// 추후 commands string 과 교체
 	bashCommand []string
-	// 컨테이너 빌드를 위한 from 이미지.
-	ImageName string
-
-	// TODO 이름 추후 수정하자.
-	RunCommand Runnable
-
 	// 추가
 	succeed bool
 }
 
-/*
-	Debug 목적으로 스택? 두개 만들어서 채널에서 보내는 값과, 받는  값각각 넣어서 비교해본다.
-*/
-
+// Debug 목적으로 스택? 두개 만들어서 채널에서 보내는 값과, 받는  값각각 넣어서 비교해본다.
 // (do not erase) close 해주는 것 : func (dag *Dag) waitTilOver(ctx context.Context) bool  에서 defer close(dag.RunningStatus) 해줌
 // (do not erase) 너무 중요.@@@@ 채널 close 방식 확인하자. https://go101.org/article/channel-closing.html 너무 좋은 자료. 왜 제목을 101 이라고 했지 중급이상인데.
-// TODO 버그 있음. 수정해야함.
-func setFunc(ctx context.Context, n *Node) {
+// setFunc commit by seoy
+func setFunc(n *Node) {
 	n.runner = func(ctx context.Context, n *Node, result chan *printStatus) {
-		//defer close(result)
+		//(do not erase) defer close(result)
 		r := preFlight(ctx, n)
 
 		result <- r
@@ -145,8 +131,9 @@ func inFlight(ctx context.Context, n *Node) *printStatus {
 		Log.Println(n.Id)
 
 		// 성골할때만 명령을 실행시키고, 실패할경우는 채널에 값만 흘려 보낸다.
+		// TODO 리턴 코드 작성하자.
 		if n.succeed {
-			err := n.RunCommand.RunE(n.ImageName)
+			_, err := n.Execute()
 
 			if err != nil {
 				Log.Println("실패")
@@ -156,18 +143,6 @@ func inFlight(ctx context.Context, n *Node) *printStatus {
 				n.succeed = true
 			}
 		}
-
-		/*if len(strings.TrimSpace(n.commands)) == 0 {
-			fmt.Println(n.Id)
-			// TODO command 추가
-			if n.c != nil {
-				n.c.Execute()
-			}
-			bResult = true
-		} else {
-			bResult = shellexecmd.Runner(n.commands)
-		}*/
-
 	}
 
 	if bResult {
@@ -339,16 +314,14 @@ func createNode(id string, r Runnable) (node *Node) {
 	return
 }
 
-// 사용하지 않음.
 // Execute add by seoy
-func (n *Node) Execute() (err error) {
-
-	err = execute(n)
+func (n *Node) Execute() (r int, err error) {
+	r, err = execute(n)
 	return
 }
 
 // execute add by seoy
-func execute(this *Node) error {
-	err := this.RunCommand.RunE(this.ImageName)
-	return err
+func execute(this *Node) (int, error) {
+	r, err := this.RunCommand.RunE(this)
+	return r, err
 }

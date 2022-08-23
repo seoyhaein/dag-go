@@ -33,6 +33,9 @@ type Dag struct {
 
 	// TODO 이름 추후 수정하자.
 	RunCommand Runnable
+
+	// 이미지를 만드는건 dag GetReady 에서 진행하도 록한다.
+	CreateImage func(n *Node) *string
 }
 
 // Edge is a channel. It has the same meaning as the connecting line connecting the parent and child nodes.
@@ -425,18 +428,16 @@ func (dag *Dag) detectCycle(startNodeId string, endNodeId string, visit map[stri
 			nextNode = nil
 		}
 	}
-
 	return cycle, end
 }
 
-func (dag *Dag) DagSetFunc(ctx context.Context) bool {
+func (dag *Dag) DagSetFunc() bool {
 	n := len(dag.nodes)
 	if n < 1 {
 		return false
 	}
-	// TODO setFunc 리턴을 추 가해줘야 함.
 	for _, v := range dag.nodes {
-		setFunc(ctx, v)
+		setFunc(v)
 	}
 	return true
 }
@@ -449,7 +450,23 @@ func (dag *Dag) GetReady(ctx context.Context) bool {
 	for _, v := range dag.nodes {
 		go v.runner(ctx, v, dag.RunningStatus)
 	}
+
+	// TODO check 이미지를 만드는 작업
+	// TODO goroutine 으로 돌려야 하지만 해당 goroutine 이 언제 끝나는지 파악해야 함으로 일단 그냥 돌린다.
+	if dag.CreateImage != nil {
+		for _, v := range dag.nodes {
+			f := dag.CreateImage
+
+			r := f(v)
+			Log.Println(*r)
+		}
+	}
+
 	return true
+}
+
+func (dag *Dag) SetCreateImageFunc(f func(n *Node) *string) {
+	dag.CreateImage = f
 }
 
 // Start start_node has one vertex. That is, it has only one channel and this channel is not included in the edge.
@@ -552,6 +569,7 @@ func (dag *Dag) debugLog() {
 	}
 }
 
+// SetTimeout commit by seoy
 func (dag *Dag) SetTimeout(d time.Duration) {
 	if dag.bTimeout == false {
 		dag.bTimeout = true
@@ -559,6 +577,7 @@ func (dag *Dag) SetTimeout(d time.Duration) {
 	dag.Timeout = d
 }
 
+// DisableTimeout commit by seoy
 func (dag *Dag) DisableTimeout() {
 	if dag.bTimeout == true {
 		dag.bTimeout = false
@@ -576,13 +595,11 @@ func (dag *Dag) AddCommand(id, c string, cmd string) (node *Node) {
 
 // nodeExist returns true if node is in dag, false otherwise
 func nodeExist(dag *Dag, nodeId string) (*Node, bool) {
-
 	for _, n := range dag.nodes {
 		if n.Id == nodeId {
 			return n, true
 		}
 	}
-
 	return nil, false
 }
 

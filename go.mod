@@ -3,11 +3,9 @@ module github.com/seoyhaein/dag-go
 go 1.18
 
 require (
-	github.com/containers/buildah v1.27.0
-	github.com/containers/image/v5 v5.22.0
 	github.com/google/uuid v1.3.0
-	github.com/seoyhaein/podbridge v0.0.0-20220822112106-93cce9f9e41c
-	github.com/seoyhaein/utils v0.0.0-20220822095725-437bdac169f9
+	github.com/seoyhaein/podbridge v0.0.0-20220823105631-880d2e5f15bd
+	github.com/seoyhaein/utils v0.0.0-20220822121450-b1609620be2f
 	github.com/sirupsen/logrus v1.9.0
 	github.com/stretchr/testify v1.8.0
 	golang.org/x/sync v0.0.0-20220819030929-7fc1605a5dde
@@ -31,7 +29,9 @@ require (
 	github.com/containerd/stargz-snapshotter/estargz v0.12.0 // indirect
 	github.com/containernetworking/cni v1.1.2 // indirect
 	github.com/containernetworking/plugins v1.1.1 // indirect
+	github.com/containers/buildah v1.27.0 // indirect
 	github.com/containers/common v0.49.1 // indirect
+	github.com/containers/image/v5 v5.22.0 // indirect
 	github.com/containers/libtrust v0.0.0-20200511145503-9c3a6c22cd9a // indirect
 	github.com/containers/ocicrypt v1.1.5 // indirect
 	github.com/containers/podman/v4 v4.2.0 // indirect
@@ -126,11 +126,11 @@ require (
 	go.mozilla.org/pkcs7 v0.0.0-20210826202110-33d05740a352 // indirect
 	go.opencensus.io v0.23.0 // indirect
 	golang.org/x/crypto v0.0.0-20220817201139-bc19a97f63c8 // indirect
-	golang.org/x/net v0.0.0-20220812174116-3211cb980234 // indirect
+	golang.org/x/net v0.0.0-20220822230855-b0a4917ee28c // indirect
 	golang.org/x/sys v0.0.0-20220818161305-2296e01440c6 // indirect
 	golang.org/x/term v0.0.0-20220722155259-a9ba230a4035 // indirect
 	golang.org/x/text v0.3.7 // indirect
-	google.golang.org/genproto v0.0.0-20220819174105-e9f053255caa // indirect
+	google.golang.org/genproto v0.0.0-20220822174746-9e6da59bd2fc // indirect
 	google.golang.org/grpc v1.48.0 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
 	gopkg.in/square/go-jose.v2 v2.6.0 // indirect

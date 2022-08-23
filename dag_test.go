@@ -32,7 +32,7 @@ func TestSimpleDag(t *testing.T) {
 		t.Errorf("%+v", err)
 	}
 	ctx := context.Background()
-	dag.DagSetFunc(ctx)
+	dag.DagSetFunc()
 	dag.GetReady(ctx)
 	b1 := dag.Start()
 	assert.Equal(true, b1, "true")

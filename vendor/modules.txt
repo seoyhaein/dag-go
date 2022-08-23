@@ -625,11 +625,11 @@ github.com/rivo/uniseg
 # github.com/seccomp/libseccomp-golang v0.10.0
 ## explicit; go 1.14
 github.com/seccomp/libseccomp-golang
-# github.com/seoyhaein/podbridge v0.0.0-20220822112106-93cce9f9e41c
+# github.com/seoyhaein/podbridge v0.0.0-20220823105631-880d2e5f15bd
 ## explicit; go 1.18
 github.com/seoyhaein/podbridge
 github.com/seoyhaein/podbridge/imageV1
-# github.com/seoyhaein/utils v0.0.0-20220822095725-437bdac169f9
+# github.com/seoyhaein/utils v0.0.0-20220822121450-b1609620be2f
 ## explicit
 github.com/seoyhaein/utils
 # github.com/shirou/gopsutil/v3 v3.22.7
@@ -754,7 +754,7 @@ golang.org/x/crypto/ssh
 golang.org/x/crypto/ssh/agent
 golang.org/x/crypto/ssh/internal/bcrypt_pbkdf
 golang.org/x/crypto/ssh/knownhosts
-# golang.org/x/net v0.0.0-20220812174116-3211cb980234
+# golang.org/x/net v0.0.0-20220822230855-b0a4917ee28c
 ## explicit; go 1.17
 golang.org/x/net/context
 golang.org/x/net/http/httpguts
@@ -784,7 +784,7 @@ golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
-# google.golang.org/genproto v0.0.0-20220819174105-e9f053255caa
+# google.golang.org/genproto v0.0.0-20220822174746-9e6da59bd2fc
 ## explicit; go 1.19
 google.golang.org/genproto/googleapis/rpc/status
 # google.golang.org/grpc v1.48.0

@@ -52,7 +52,7 @@ func xmlParser(x []*Node) (context.Context, bool, *Dag) {
 		dag.FinishDag()
 
 		ctx := context.Background()
-		dag.DagSetFunc(ctx)
+		dag.DagSetFunc()
 		dag.GetReady(ctx)
 		//dag.start()
 

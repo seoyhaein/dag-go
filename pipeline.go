@@ -9,7 +9,7 @@ import (
 )
 
 type Runnable interface {
-	RunE(imageName string) error
+	RunE(a interface{}) (int, error)
 }
 
 type Pipeline struct {
@@ -22,6 +22,7 @@ type Pipeline struct {
 // 파이프라인은 dag 와 데이터를 연계해야 하는데 데이터의 경우는 다른 xml 처리하는 것이 바람직할 것이다.
 // 외부에서 데이터를 가지고 올 경우, ftp 나 scp 나 기타 다른 프롤토콜을 사용할 경우도 생각을 해야 한다.
 
+// TODO Runnable 삭제 가능.
 func NewPipeline(r Runnable) *Pipeline {
 
 	return &Pipeline{
@@ -38,7 +39,7 @@ func (pipe *Pipeline) Start(ctx context.Context) {
 	}
 
 	for _, d := range pipe.Dags {
-		d.DagSetFunc(ctx)
+		d.DagSetFunc()
 		d.GetReady(ctx)
 		d.Start()
 		d.WaitTilOver(ctx)

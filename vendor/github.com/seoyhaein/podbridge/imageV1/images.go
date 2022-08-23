@@ -14,8 +14,8 @@ import (
 	"github.com/containers/storage"
 	"github.com/containers/storage/pkg/unshare"
 	"github.com/opencontainers/go-digest"
-	pbr "github.com/seoyhaein/podbridge"
 	"github.com/seoyhaein/utils"
+	"github.com/sirupsen/logrus"
 )
 
 // https://acet.pe.kr/935
@@ -29,10 +29,9 @@ import (
 // 모두 지우기
 // podman rmi --force -a
 
-// TODO import cycle 해결해야함. pbr 빼버리자. 밖으로...
 var (
 	digester = digest.Canonical.Digester()
-	log      = pbr.Log
+	log      = logrus.New()
 
 	//TODO 추후 수정 일단 넣어 놓음
 	Verbose = true
@@ -48,6 +47,7 @@ type Builder struct {
 	builder *buildah.Builder
 }
 
+// NewOption commit by seoy
 func NewOption() *BuilderOption {
 	opt := new(buildah.BuilderOptions)
 	return &BuilderOption{
@@ -55,6 +55,7 @@ func NewOption() *BuilderOption {
 	}
 }
 
+// Arg commit by seoy
 func (o *BuilderOption) Arg(k string, v string) *BuilderOption {
 	// map 중복 체크
 	if _, ok := o.BuilderOpt.Args[k]; ok {
@@ -64,6 +65,7 @@ func (o *BuilderOption) Arg(k string, v string) *BuilderOption {
 	return o
 }
 
+// FromImage commit by seoy
 func (o *BuilderOption) FromImage(fromImage string) *BuilderOption {
 	if utils.IsEmptyString(fromImage) {
 		return nil
@@ -72,6 +74,7 @@ func (o *BuilderOption) FromImage(fromImage string) *BuilderOption {
 	return o
 }
 
+// Other builderOption 세팅
 func (o *BuilderOption) Other() *BuilderOption {
 	buildOpts := &buildah.CommonBuildOptions{}
 	builderOption := &buildah.BuilderOptions{
@@ -86,8 +89,7 @@ func (o *BuilderOption) Other() *BuilderOption {
 	return o
 }
 
-//TODO context pointer 쓸지 생각하자.
-
+// NewBuilder commit by seoy
 func NewBuilder(ctx context.Context, o *BuilderOption /*opt *buildah.BuilderOptions*/) (context.Context, *Builder, error) {
 
 	store, err := NewStore()
@@ -110,6 +112,7 @@ func NewBuilder(ctx context.Context, o *BuilderOption /*opt *buildah.BuilderOpti
 	return ctx, b, nil
 }
 
+// NewStore commit by seoy
 func NewStore() (storage.Store, error) {
 	buildStoreOptions, err := storage.DefaultStoreOptions(unshare.IsRootless(), unshare.GetRootlessUID())
 	if err != nil {
@@ -124,6 +127,7 @@ func NewStore() (storage.Store, error) {
 	return buildStore, nil
 }
 
+// Add commit by seoy
 func (b *Builder) Add(from, to string) error {
 	err := b.builder.Add(to, false, buildah.AddAndCopyOptions{Hasher: digester.Hash()}, from)
 	if err != nil {
@@ -132,8 +136,7 @@ func (b *Builder) Add(from, to string) error {
 	return nil
 }
 
-// TODO > or >> 등 파이프 관련해서 작동하지 않음.
-
+// Run TODO > or >> 등 파이프 관련해서 작동하지 않음. 지원해줄지 생각하자.
 func (b *Builder) Run(s string) error {
 
 	logger := GetLoggerWriter()
@@ -167,24 +170,7 @@ func (b *Builder) Run(s string) error {
 	return nil
 }
 
-/*func (b *Builder) RunA(s string) error {
-
-	logger := GetLoggerWriter()
-	runOptions := buildah.RunOptions{
-		Stdout:    logger,
-		Stderr:    logger,
-		Isolation: define.IsolationChroot,
-	}
-
-	command := strings.Split(s, " ")
-
-	err := b.builder.Run(command, runOptions)
-	if err != nil {
-		return fmt.Errorf("error while runnning command: %v", err)
-	}
-	return nil
-}*/
-
+//WorkDir commit by seoy
 func (b *Builder) WorkDir(path string) error {
 	if utils.IsEmptyString(path) {
 		return fmt.Errorf("path is empty")
@@ -193,6 +179,7 @@ func (b *Builder) WorkDir(path string) error {
 	return nil
 }
 
+// Env commit by seoy
 func (b *Builder) Env(k, v string) error {
 	if utils.IsEmptyString(k) || utils.IsEmptyString(v) {
 		return fmt.Errorf("key or valeu is empty")
@@ -202,6 +189,7 @@ func (b *Builder) Env(k, v string) error {
 	return nil
 }
 
+// User commit by seoy
 func (b *Builder) User(u string) error {
 	if utils.IsEmptyString(u) {
 		return fmt.Errorf("user is empty")
@@ -211,6 +199,7 @@ func (b *Builder) User(u string) error {
 	return nil
 }
 
+// Expose commit by seoy
 func (b *Builder) Expose(port string) error {
 	if utils.IsEmptyString(port) {
 		return fmt.Errorf("port is empty")
@@ -219,6 +208,7 @@ func (b *Builder) Expose(port string) error {
 	return nil
 }
 
+// Cmd commit by seoy
 func (b *Builder) Cmd(cmd ...string) error {
 	if len(cmd) == 0 {
 		return fmt.Errorf("command is empty")
@@ -227,6 +217,7 @@ func (b *Builder) Cmd(cmd ...string) error {
 	return nil
 }
 
+// CommitImage commit by seoy
 func (b *Builder) CommitImage(ctx context.Context, preferredManifestType string, sysCtx *types.SystemContext, repository string) (*string, error) {
 
 	imageRef, err := is.Transport.ParseStoreReference(b.store, repository)
@@ -238,12 +229,15 @@ func (b *Builder) CommitImage(ctx context.Context, preferredManifestType string,
 		PreferredManifestType: preferredManifestType,
 		SystemContext:         sysCtx,
 	})
-	if pbr.Basket != nil {
+
+	// import cycle 때문에 삭제함.
+	/*if pbr.Basket != nil {
 		pbr.Basket.AddImagesId(imageId)
-	}
+	}*/
 	return &imageId, err
 }
 
+// Delete commit by seoy
 func (b *Builder) Delete() error {
 	err := b.builder.Delete()
 
@@ -253,6 +247,7 @@ func (b *Builder) Delete() error {
 	return nil
 }
 
+// Shutdown commit by seoy
 func (b *Builder) Shutdown() error {
 	_, err := b.store.Shutdown(false)
 
@@ -262,6 +257,7 @@ func (b *Builder) Shutdown() error {
 	return nil
 }
 
+// GetLoggerWriter TODO Verbose Debug 관련 업데이트 하자.
 func GetLoggerWriter() io.Writer {
 	if Verbose || Debug {
 		return os.Stdout
@@ -275,8 +271,3 @@ type NopLogger struct{}
 func (n NopLogger) Write(p []byte) (int, error) {
 	return len(p), nil
 }
-
-// TODO buildah/config.go 참고
-// 만들어진 이미지 검사
-// https://stackoverflow.com/questions/19104847/how-to-generate-a-dockerfile-from-an-image
-// https://github.com/containers/buildah/blob/main/troubleshooting.md verify

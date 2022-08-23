@@ -35,6 +35,32 @@ Like the interval value, it is a time duration.
 It describes the period of time the healthcheck itself must complete before being considered unsuccessful.
 */
 
+type HealthCheck struct {
+	InCmd       string
+	Interval    string
+	Retries     uint
+	Timeout     string
+	StartPeriod string
+}
+
+func (h *HealthCheck) SetHealthChecker() (*manifest.Schema2HealthConfig, error) {
+	healthConfig, err := makeHealthCheckFromCli(h.InCmd, h.Interval, h.Retries, h.Timeout, h.StartPeriod)
+	if err != nil {
+		return nil, err
+	}
+	return healthConfig, nil
+}
+
+func CreateHealthCheck(inCmd, interval string, retries uint, timeout, startPeriod string) *HealthCheck {
+	return &HealthCheck{
+		InCmd:       inCmd,
+		Interval:    interval,
+		Retries:     retries,
+		Timeout:     timeout,
+		StartPeriod: startPeriod,
+	}
+}
+
 func SetHealthChecker(inCmd, interval string, retries uint, timeout, startPeriod string) (*manifest.Schema2HealthConfig, error) {
 	healthConfig, err := makeHealthCheckFromCli(inCmd, interval, retries, timeout, startPeriod)
 	if err != nil {
