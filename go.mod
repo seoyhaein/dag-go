@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/google/uuid v1.3.0
-	github.com/seoyhaein/podbridge v0.0.0-20220823105631-880d2e5f15bd
+	github.com/seoyhaein/podbridge v0.0.0-20220823110851-6094e65ea82f
 	github.com/seoyhaein/utils v0.0.0-20220822121450-b1609620be2f
 	github.com/sirupsen/logrus v1.9.0
 	github.com/stretchr/testify v1.8.0

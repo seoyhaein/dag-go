@@ -67,7 +67,7 @@ func CreateCustomImage(exePath, healthCheckerPath, imageName, cmd string) *strin
 		Log.Println("Add error")
 		panic(err)
 	}
-	// add healthchecker.sh 추가해줌.
+	// add healthcheck.sh 추가해줌.
 	err = builder.Add(healthCheckerPath, "/app/healthcheck")
 	if err != nil {
 		Log.Println("Add error")
@@ -108,6 +108,73 @@ func CreateCustomImageT(imageName, healthCheckerPath, cmd string) *string {
 	MustFirstCall()
 
 	baseImage := CreateBaseImage(healthCheckerPath)
+	if baseImage == nil {
+		panic("baseImage is nil")
+	}
+
+	opt := v1.NewOption().Other().FromImage(*baseImage)
+	ctx, builder, err := v1.NewBuilder(context.Background(), opt)
+
+	defer func() {
+		builder.Shutdown()
+		builder.Delete()
+	}()
+
+	if err != nil {
+		Log.Printf("NewBuilder error")
+		panic(err)
+	}
+
+	err = builder.WorkDir("/app")
+	if err != nil {
+		Log.Println("WorkDir")
+		panic(err)
+	}
+
+	// ADD/Copy 동일함.
+	// executor.sh 추가 해줌.
+	_, executorPath, _ = genExecutorSh(".", "executor.sh", cmd)
+	err = builder.Add(*executorPath, "/app/healthcheck")
+	if err != nil {
+		Log.Println("Add error")
+		panic(err)
+	}
+
+	err = builder.Cmd("/app/healthcheck/executor.sh")
+	if err != nil {
+		Log.Println("cmd error")
+		panic(err)
+	}
+
+	// TODO 이부분 향후 이 임포트 숨기는 방향으로 간다.
+	sysCtx := &types.SystemContext{}
+	image, err := builder.CommitImage(ctx, buildah.Dockerv2ImageManifest, sysCtx, imageName)
+
+	if err != nil {
+		Log.Println("CommitImage error")
+		panic(err)
+	}
+
+	return image
+}
+
+func CreateCustomImageWithHC(imageName, cmd string) *string {
+	if utils.IsEmptyString(imageName) {
+		return nil
+	}
+	var executorPath *string
+	// 이미지 만들고 생성한 file 삭제
+	defer func(path string) {
+		err := os.Remove(path)
+		if err != nil {
+			panic(err)
+		}
+	}(*executorPath)
+
+	// TODO MustFristCall 중복 호출에 대한 부분 check.
+	MustFirstCall()
+
+	baseImage := CreateBaseImage("./healthcheck/healthcheck.sh")
 	if baseImage == nil {
 		panic("baseImage is nil")
 	}
@@ -206,7 +273,7 @@ echo "exit:"$? | tee ./log
 	return nil, nil, fmt.Errorf("cannot create file")
 }
 
-// CreateBaseImage healthchecker 를 넣는다.
+// CreateBaseImage healthcheck 를 넣는다.
 func CreateBaseImage(healthCheckerPath string) *string {
 
 	MustFirstCall()
@@ -250,7 +317,7 @@ func CreateBaseImage(healthCheckerPath string) *string {
 			Log.Println("Add error")
 			panic(err)
 		}*/
-	// add healthchecker.sh 추가해줌.
+	// add healthcheck.sh 추가해줌.
 	err = builder.Add(healthCheckerPath, "/app/healthcheck")
 	if err != nil {
 		Log.Println("Add error")
