@@ -11,7 +11,7 @@ import (
 // https://stackoverflow.com/questions/48263281/how-to-find-sshd-service-status-in-golang
 
 type Container struct {
-	context context.Context
+	Context context.Context
 }
 
 func Connect() *Container {
@@ -21,7 +21,7 @@ func Connect() *Container {
 	}
 
 	return &Container{
-		context: ctx,
+		Context: ctx,
 	}
 }
 
@@ -30,7 +30,7 @@ func (c *Container) RunE(a interface{}) (int, error) {
 
 	n, ok := a.(*Node)
 	if ok {
-		r := createContainer(c.context, n)
+		r := createContainer(c.Context, n)
 		return r, nil
 	}
 	return 8, fmt.Errorf("RunE failed")
