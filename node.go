@@ -316,8 +316,12 @@ func createNode(id string, r Runnable) (node *Node) {
 
 // Execute add by seoy
 func (n *Node) Execute() (r int, err error) {
-	r, err = execute(n)
-	return
+	if n.RunCommand != nil {
+		r, err = execute(n)
+		return
+	}
+
+	return 8, fmt.Errorf("cannot execute")
 }
 
 // execute add by seoy
