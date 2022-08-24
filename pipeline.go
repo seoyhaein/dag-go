@@ -8,10 +8,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type Runnable interface {
-	RunE(a interface{}) (int, error)
-}
-
 type Pipeline struct {
 	Id   string
 	Dags []*Dag

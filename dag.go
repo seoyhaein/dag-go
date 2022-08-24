@@ -3,6 +3,7 @@ package dag_go
 import (
 	"context"
 	"fmt"
+	"golang.org/x/sync/errgroup"
 	"time"
 
 	"github.com/google/uuid"
@@ -440,6 +441,22 @@ func (dag *Dag) DagSetFunc() bool {
 		setFunc(v)
 	}
 	return true
+}
+
+func (dag *Dag) BeforeGetReady(ctx context.Context) {
+	eg, _ := errgroup.WithContext(ctx)
+
+	for _, v := range dag.nodes {
+		eg.Go(func() error {
+			err := dag.RunCommand.CreateImage(v)
+			return err
+		})
+	}
+
+	err := eg.Wait()
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (dag *Dag) GetReady(ctx context.Context) bool {

@@ -40,6 +40,23 @@ func (c *Container) RunE(a interface{}) (int, error) {
 	return 8, fmt.Errorf("RunE failed")
 }
 
+//CreateImage TODO healthCheckr 의 empty 검사만 하지만 실제로 healthchecker.sh 가 있는지 파악하는 구문 들어갈지 생각하자.
+func (c *Container) CreateImage(a interface{}, healthChecker string) error {
+	n, ok := a.(*Node)
+	if ok {
+		if utils.IsEmptyString(healthChecker) {
+			return fmt.Errorf("healthChecker is empty")
+		}
+		base := pbr.CreateBaseImage(healthChecker)
+		nodeImage := pbr.CreateCustomImageB(n.Id, base, `echo "hello world"`)
+		if nodeImage == nil {
+			fmt.Errorf("cannot create node image")
+		}
+		n.ImageName = *nodeImage
+	}
+	return nil
+}
+
 func createContainer(ctx context.Context, n *Node) int {
 	// spec 만들기
 	conSpec := pbr.NewSpec()
