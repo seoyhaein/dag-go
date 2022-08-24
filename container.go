@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	pbr "github.com/seoyhaein/podbridge"
+	"github.com/seoyhaein/utils"
 )
 
 // TODO buildah, types 는 imageV1 과 podbridge 에서 해결해줘야 함.
@@ -31,6 +32,9 @@ func (c *Container) RunE(a interface{}) (int, error) {
 	n, ok := a.(*Node)
 	if ok {
 		r := createContainer(c.Context, n)
+		if r == 8 {
+			return 8, fmt.Errorf("node's ImageNme is empty")
+		}
 		return r, nil
 	}
 	return 8, fmt.Errorf("RunE failed")
@@ -39,6 +43,9 @@ func (c *Container) RunE(a interface{}) (int, error) {
 func createContainer(ctx context.Context, n *Node) int {
 	// spec 만들기
 	conSpec := pbr.NewSpec()
+	if utils.IsEmptyString(n.ImageName) {
+		return 8
+	}
 	conSpec.SetImage(n.ImageName)
 
 	f := func(spec pbr.SpecGen) pbr.SpecGen {
