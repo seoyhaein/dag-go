@@ -40,7 +40,8 @@ func (c *Container) RunE(a interface{}) (int, error) {
 	return 8, fmt.Errorf("RunE failed")
 }
 
-//CreateImage TODO healthCheckr 의 empty 검사만 하지만 실제로 healthchecker.sh 가 있는지 파악하는 구문 들어갈지 생각하자.
+// CreateImage TODO healthCheckr 의 empty 검사만 하지만 실제로 healthchecker.sh 가 있는지 파악하는 구문 들어갈지 생각하자.
+// 각 노드의 이미지 를만들어 줌.
 func (c *Container) CreateImage(a interface{}, healthChecker string) error {
 	n, ok := a.(*Node)
 	if ok {
@@ -57,6 +58,7 @@ func (c *Container) CreateImage(a interface{}, healthChecker string) error {
 	return nil
 }
 
+// 각 노드의 이미지를 가지고 container 를 만들어줌.
 func createContainer(ctx context.Context, n *Node) int {
 	// spec 만들기
 	conSpec := pbr.NewSpec()
