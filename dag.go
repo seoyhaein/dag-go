@@ -443,12 +443,12 @@ func (dag *Dag) DagSetFunc() bool {
 	return true
 }
 
-func (dag *Dag) BeforeGetReady(ctx context.Context) {
+func (dag *Dag) BeforeGetReady(ctx context.Context, healthChecker string) {
 	eg, _ := errgroup.WithContext(ctx)
 
 	for _, v := range dag.nodes {
 		eg.Go(func() error {
-			err := dag.RunCommand.CreateImage(v)
+			err := dag.RunCommand.CreateImage(v, healthChecker)
 			return err
 		})
 	}
