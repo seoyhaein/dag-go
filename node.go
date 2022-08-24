@@ -314,14 +314,14 @@ func createNode(id string, r Runnable) (node *Node) {
 	return
 }
 
-// Execute add by seoy
+// Execute 이것을 작성하면 된다.
 func (n *Node) Execute() (r int, err error) {
 	if n.RunCommand != nil {
 		r, err = execute(n)
 		return
 	}
-
-	return 8, fmt.Errorf("cannot execute")
+	// Container 를 사용하 지않는 다른 명령어를 넣을 경우 여기서 작성하면 된다.
+	return 7, nil
 }
 
 // execute add by seoy
