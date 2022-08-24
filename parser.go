@@ -44,7 +44,7 @@ func xmlParser(x []*Node) (context.Context, bool, *Dag) {
 		}
 
 		visited := dag.visitReset()
-		dag.detectCycle(dag.startNode.Id, dag.startNode.Id, visited)
+		dag.detectCycle(dag.StartNode.Id, dag.StartNode.Id, visited)
 		//result, _ := dag.detectCycle(dag.startNode.Id, dag.startNode.Id, visited)
 		//fmt.Printf("%t", result)
 
