@@ -3,7 +3,6 @@ package dag_go
 import (
 	"context"
 	"fmt"
-	"golang.org/x/sync/errgroup"
 	"time"
 
 	"github.com/google/uuid"
@@ -442,26 +441,31 @@ func (dag *Dag) DagSetFunc() bool {
 	return true
 }
 
-//BeforeGetReady 이건 컨테이너 전용
+//BeforeGetReady 이건 컨테이너 전용- 이미지 생성할때 고루틴 돌리니 에러 발생..
 func (dag *Dag) BeforeGetReady(ctx context.Context, healthChecker string) {
 
 	if dag.ContainerCmd == nil {
 		panic("ContainerCmd is not set")
 	}
 
-	eg, _ := errgroup.WithContext(ctx)
+	//eg, _ := errgroup.WithContext(ctx)
 
 	for _, v := range dag.nodes {
-		eg.Go(func() error {
-			err := dag.ContainerCmd.CreateImage(v, healthChecker)
-			return err
-		})
+
+		//	hc := healthChecker
+		//	eg.Go(func() error {
+		err := dag.ContainerCmd.CreateImage(v, healthChecker)
+		if err != nil {
+			return
+		}
+		//		return err
+		//	})
 	}
 
-	err := eg.Wait()
-	if err != nil {
-		panic(err)
-	}
+	//err := eg.Wait()
+	//if err != nil {
+	//	panic(err)
+	//}
 }
 
 func (dag *Dag) GetReady(ctx context.Context) bool {
