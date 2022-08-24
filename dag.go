@@ -442,7 +442,13 @@ func (dag *Dag) DagSetFunc() bool {
 	return true
 }
 
+//BeforeGetReady 이건 컨테이너 전용
 func (dag *Dag) BeforeGetReady(ctx context.Context, healthChecker string) {
+
+	if dag.ContainerCmd == nil {
+		panic("ContainerCmd is not set")
+	}
+
 	eg, _ := errgroup.WithContext(ctx)
 
 	for _, v := range dag.nodes {
