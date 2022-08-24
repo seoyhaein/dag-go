@@ -585,7 +585,7 @@ func (dag *Dag) DisableTimeout() {
 }
 
 // AddCommand add command to node. TODO node 의 field 가 늘어날때 수정해준다.
-func (dag *Dag) AddCommand(id, c string, cmd string) (node *Node) {
+func (dag *Dag) AddCommand(id, cmd string) (node *Node) {
 	node = nil
 	if n, b := nodeExist(dag, id); b == true {
 		n.commands = cmd

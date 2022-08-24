@@ -25,7 +25,7 @@ func TestSimpleDag(t *testing.T) {
 	dag.AddEdge("2", "5")
 	dag.AddEdge("5", "6")
 	// TODO 수정해야함.
-	dag.AddCommand("1", "", "")
+	dag.AddCommand("1", "")
 
 	err := dag.FinishDag()
 	if err != nil {
