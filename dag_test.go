@@ -18,7 +18,7 @@ func TestSimpleDag(t *testing.T) {
 
 	// create dag
 	// 2번에 실패를 두고 테스트 진행하자.
-	dag.AddEdge(dag.startNode.Id, "1")
+	dag.AddEdge(dag.StartNode.Id, "1")
 	dag.AddEdge("1", "2")
 	dag.AddEdge("1", "3")
 	dag.AddEdge("1", "4")

@@ -16,8 +16,8 @@ type Dag struct {
 	Edges []*Edge
 
 	nodes     map[string]*Node
-	startNode *Node
-	endNode   *Node
+	StartNode *Node
+	EndNode   *Node
 	validated bool
 
 	RunningStatus chan *printStatus
@@ -58,16 +58,16 @@ func NewDag(r Runnable) *Dag {
 	dag.nodes = make(map[string]*Node)
 	dag.Id = uuid.NewString()
 	dag.validated = false
-	dag.startNode = dag.createNode(StartNode)
+	dag.StartNode = dag.createNode(StartNode)
 
 	// 시작할때 넣어주는 채널 여기서 세팅된다.
 	// error message : 중복된 node id 로 노드를 생성하려고 했습니다, createNode
-	if dag.startNode == nil {
+	if dag.StartNode == nil {
 		return nil
 	}
 	// 시작노드는 반드시 하나의 채널을 넣어 줘야 한다.
 	// start 함수에서 채널 값을 넣어준다.
-	dag.startNode.parentVertex = append(dag.startNode.parentVertex, make(chan runningStatus, Min))
+	dag.StartNode.parentVertex = append(dag.StartNode.parentVertex, make(chan runningStatus, Min))
 
 	// TODO 일단 퍼퍼를 1000 으로 둠
 	// TODO n 을 향후에는 조정하자. 각 노드의 수로 채널 버퍼를 지정할 수 없다. 또한 그럴 필요도 없을 수도 있다.
@@ -85,16 +85,16 @@ func NewDagWithPId(pid string, n string, r Runnable) *Dag {
 	dag.Id = fmt.Sprintf("%s-%s", pid, n)
 	dag.validated = false
 
-	dag.startNode = dag.createNode(StartNode)
+	dag.StartNode = dag.createNode(StartNode)
 
 	// 시작할때 넣어주는 채널 여기서 세팅된다.
 	// error message : 중복된 node id 로 노드를 생성하려고 했습니다, createNode
-	if dag.startNode == nil {
+	if dag.StartNode == nil {
 		return nil
 	}
 	// 시작노드는 반드시 하나의 채널을 넣어 줘야 한다.
 	// start 함수에서 채널 값을 넣어준다.
-	dag.startNode.parentVertex = append(dag.startNode.parentVertex, make(chan runningStatus, Min))
+	dag.StartNode.parentVertex = append(dag.StartNode.parentVertex, make(chan runningStatus, Min))
 
 	// TODO 일단 퍼퍼를 1000 으로 둠
 	// TODO n 을 향후에는 조정하자. 각 노드의 수로 채널 버퍼를 지정할 수 없다. 또한 그럴 필요도 없을 수도 있다.
@@ -309,9 +309,9 @@ func (dag *Dag) FinishDag() error {
 		temp[k] = v
 	}
 
-	dag.endNode = dag.createNode(EndNode)
+	dag.EndNode = dag.createNode(EndNode)
 	//TODO check add by seoy
-	dag.endNode.succeed = true
+	dag.EndNode.succeed = true
 	for _, n := range temp {
 		if len(n.children) == 0 && len(n.parent) == 0 {
 			if len(temp) == 1 {
@@ -323,7 +323,7 @@ func (dag *Dag) FinishDag() error {
 			}
 		}
 		if n.Id != EndNode {
-			err := dag.addEndNode(n, dag.endNode)
+			err := dag.addEndNode(n, dag.EndNode)
 			if err != nil {
 				return fmt.Errorf("addEndNode failed")
 			}
@@ -472,19 +472,19 @@ func (dag *Dag) SetCreateImageFunc(f func(n *Node) *string) {
 // Start start_node has one vertex. That is, it has only one channel and this channel is not included in the edge.
 // It is started by sending a value to this channel when starting the dag's operation.
 func (dag *Dag) Start() bool {
-	n := len(dag.startNode.parentVertex)
+	n := len(dag.StartNode.parentVertex)
 	// 1 이 아니면 에러다.
 	if n != 1 {
 		return false
 	}
 
-	dag.startNode.succeed = true
+	dag.StartNode.succeed = true
 	go func(c chan runningStatus) {
 		ch := c
 		ch <- Start
 		// add by seoy, channel closing principle
 		close(ch)
-	}(dag.startNode.parentVertex[0])
+	}(dag.StartNode.parentVertex[0])
 
 	return true
 }
@@ -611,7 +611,7 @@ func (dag *Dag) AddNodeToStartNode(to *Node) error {
 		return fmt.Errorf("node is nil")
 	}
 
-	fromNode := dag.startNode
+	fromNode := dag.StartNode
 	toNode := dag.nodes[to.Id]
 
 	if toNode != nil {
