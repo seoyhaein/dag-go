@@ -441,7 +441,8 @@ func (dag *Dag) DagSetFunc() bool {
 	return true
 }
 
-//BeforeGetReady 이건 컨테이너 전용- 이미지 생성할때 고루틴 돌리니 에러 발생..
+// BeforeGetReady 이건 컨테이너 전용- 이미지 생성할때 고루틴 돌리니 에러 발생..
+// TODO check ContainerCmd
 func (dag *Dag) BeforeGetReady(ctx context.Context, healthChecker string) {
 
 	if dag.ContainerCmd == nil {

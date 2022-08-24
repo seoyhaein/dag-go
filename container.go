@@ -13,7 +13,8 @@ import (
 // https://stackoverflow.com/questions/48263281/how-to-find-sshd-service-status-in-golang
 
 type Container struct {
-	Context context.Context
+	Context   context.Context
+	BaseImage string
 }
 
 func Connect() *Container {
@@ -49,8 +50,11 @@ func (c *Container) CreateImage(a interface{}, healthChecker string) error {
 		if utils.IsEmptyString(healthChecker) {
 			return fmt.Errorf("healthChecker is empty")
 		}
-		base := pbr.CreateBaseImage(healthChecker)
-		nodeImage := pbr.CreateCustomImageB(n.Id, base, `echo "hello world"`)
+		if utils.IsEmptyString(c.BaseImage) {
+			c.BaseImage = pbr.CreateBaseImage(healthChecker)
+		}
+
+		nodeImage := pbr.CreateCustomImageB(n.Id, c.BaseImage, `echo "hello world"`)
 		if nodeImage == nil {
 			fmt.Errorf("cannot create node image")
 		}
