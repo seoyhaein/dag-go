@@ -470,14 +470,14 @@ func (dag *Dag) GetReady(ctx context.Context) bool {
 
 	// TODO check 이미지를 만드는 작업
 	// TODO goroutine 으로 돌려야 하지만 해당 goroutine 이 언제 끝나는지 파악해야 함으로 일단 그냥 돌린다.
-	if dag.CreateImage != nil {
+	/*if dag.CreateImage != nil {
 		for _, v := range dag.nodes {
 			f := dag.CreateImage
 
 			r := f(v)
 			Log.Println(*r)
 		}
-	}
+	}*/
 
 	return true
 }
