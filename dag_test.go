@@ -13,8 +13,9 @@ import (
 func TestSimpleDag(t *testing.T) {
 	assert := assert.New(t)
 
-	runnable := Connect()
-	dag := NewDag(runnable)
+	//runnable := Connect()
+	dag := NewDag()
+	//dag.SetContainerCmd(runnable)
 
 	// create dag
 	// 2번에 실패를 두고 테스트 진행하자.

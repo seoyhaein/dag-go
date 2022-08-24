@@ -30,13 +30,11 @@ type Dag struct {
 	Timeout  time.Duration
 	bTimeout bool
 
-	//cmd *Command
-
 	// TODO 이름 추후 수정하자.
-	RunCommand Runnable
+	ContainerCmd Runnable
 
 	// 이미지를 만드는건 dag GetReady 에서 진행하도 록한다.
-	CreateImage func(n *Node) *string
+	//CreateImage func(n *Node) *string
 }
 
 // Edge is a channel. It has the same meaning as the connecting line connecting the parent and child nodes.
@@ -54,7 +52,7 @@ type callOrder struct {
 // One channel must be put in the start node. Enter this channel value in the start function.
 // And this channel is not included in Edge.
 // TODO 파라미터 nil 허용해주도록 바꿔줄지 생각함.
-func NewDag(r Runnable) *Dag {
+func NewDag() *Dag {
 	dag := new(Dag)
 	dag.nodes = make(map[string]*Node)
 	dag.Id = uuid.NewString()
@@ -73,9 +71,6 @@ func NewDag(r Runnable) *Dag {
 	// TODO 일단 퍼퍼를 1000 으로 둠
 	// TODO n 을 향후에는 조정하자. 각 노드의 수로 채널 버퍼를 지정할 수 없다. 또한 그럴 필요도 없을 수도 있다.
 	dag.RunningStatus = make(chan *printStatus, 1000)
-
-	// TODO 일단 간단히 넣었음.
-	dag.RunCommand = r
 
 	return dag
 }
@@ -102,6 +97,10 @@ func NewDagWithPId(pid string, n string, r Runnable) *Dag {
 	dag.RunningStatus = make(chan *printStatus, 1000)
 
 	return dag
+}
+
+func (dag *Dag) SetContainerCmd(r Runnable) {
+	dag.ContainerCmd = r
 }
 
 // createEdge creates an Edge. Edge has the ID of the child node and the ID of the child node.
@@ -194,7 +193,7 @@ func (dag *Dag) createNode(id string) *Node {
 		}
 	}
 	// TODO 추가적으로 수정할 예정임.
-	node := createNode(id, dag.RunCommand)
+	node := createNode(id, dag.ContainerCmd)
 
 	node.parentDag = dag
 	dag.nodes[id] = node
@@ -448,7 +447,7 @@ func (dag *Dag) BeforeGetReady(ctx context.Context, healthChecker string) {
 
 	for _, v := range dag.nodes {
 		eg.Go(func() error {
-			err := dag.RunCommand.CreateImage(v, healthChecker)
+			err := dag.ContainerCmd.CreateImage(v, healthChecker)
 			return err
 		})
 	}
@@ -482,9 +481,9 @@ func (dag *Dag) GetReady(ctx context.Context) bool {
 	return true
 }
 
-func (dag *Dag) SetCreateImageFunc(f func(n *Node) *string) {
-	dag.CreateImage = f
-}
+/*func (dag *Dag) SetCreateImageFunc(f func(n *Node) *string) {
+	dag.ContainerCmd = f
+}*/
 
 // Start start_node has one vertex. That is, it has only one channel and this channel is not included in the edge.
 // It is started by sending a value to this channel when starting the dag's operation.

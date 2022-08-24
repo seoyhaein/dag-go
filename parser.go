@@ -22,8 +22,8 @@ func xmlParser(x []*Node) (context.Context, bool, *Dag) {
 
 	n := len(x)
 	//TODO 일단 에러 때문에 이렇게 넣었지만, 이걸 외부로 빼야함.
-	runnable := Connect()
-	dag := NewDag(runnable)
+	//runnable := Connect()
+	dag := NewDag()
 
 	if n >= 1 { // node 가 최소 하나 이상은 있어야 한다.
 		//dag := NewDag()
