@@ -104,11 +104,10 @@ func (dag *Dag) SetContainerCmd(r Runnable) {
 
 // createEdge creates an Edge. Edge has the ID of the child node and the ID of the child node.
 // Therefore, the Edge is created with the ID of the parent node and the ID of the child node the same.
-func (dag *Dag) createEdge(parentId, childId string) (*Edge, createEdgeErrorType) {
+func (dag *Dag) createEdgeT(parentId, childId string) (*Edge, createEdgeErrorType) {
 	if utils.IsEmptyString(parentId) || utils.IsEmptyString(childId) {
 		return nil, Fault
 	}
-
 	// 총 4가지를 생각해야 할 거 같다.
 	for _, v := range dag.Edges {
 		if v.parentId == parentId {
@@ -155,6 +154,36 @@ func (dag *Dag) createEdge(parentId, childId string) (*Edge, createEdgeErrorType
 	dag.Edges = append(dag.Edges, cm)
 
 	return cm, Create
+}
+
+func (dag *Dag) createEdge(parentId, childId string) (*Edge, createEdgeErrorType) {
+	if utils.IsEmptyString(parentId) || utils.IsEmptyString(childId) {
+		return nil, Fault
+	}
+
+	r := findEdges(dag.Edges, parentId, childId)
+
+	if r == -1 {
+		return nil, Exist
+	}
+	cm := new(Edge)
+	cm.parentId = parentId
+	cm.childId = childId
+	cm.vertex = make(chan runningStatus, Min)
+	dag.Edges = append(dag.Edges, cm)
+
+	return cm, Create
+
+}
+
+//findEdges 같은게 있으면 -1, 같은게 없으면 0
+func findEdges(es []*Edge, parentId, childId string) int {
+	for _, e := range es {
+		if e.parentId == parentId && e.childId == childId {
+			return -1
+		}
+	}
+	return 0
 }
 
 func (dag *Dag) getVertex(parentId, childId string) chan runningStatus {
@@ -321,7 +350,7 @@ func (dag *Dag) FinishDag() error {
 				return fmt.Errorf("there are nodes that have no parent node and no child nodes")
 			}
 		}
-		if n.Id != EndNode {
+		if n.Id != EndNode && len(n.children) == 0 {
 			err := dag.addEndNode(n, dag.EndNode)
 			if err != nil {
 				return fmt.Errorf("addEndNode failed")
