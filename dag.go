@@ -66,10 +66,8 @@ func NewDag() *Dag {
 	// 시작노드는 반드시 하나의 채널을 넣어 줘야 한다.
 	// start 함수에서 채널 값을 넣어준다.
 	dag.StartNode.parentVertex = append(dag.StartNode.parentVertex, make(chan runningStatus, Min))
-
-	// TODO 일단 퍼퍼를 1000 으로 둠
-	// TODO n 을 향후에는 조정하자. 각 노드의 수로 채널 버퍼를 지정할 수 없다. 또한 그럴 필요도 없을 수도 있다.
-	dag.RunningStatus = make(chan *printStatus, 1000)
+	// TODO check
+	dag.RunningStatus = make(chan *printStatus, Max)
 
 	return dag
 }
@@ -91,9 +89,8 @@ func NewDagWithPId(pid string, n string, r Runnable) *Dag {
 	// start 함수에서 채널 값을 넣어준다.
 	dag.StartNode.parentVertex = append(dag.StartNode.parentVertex, make(chan runningStatus, Min))
 
-	// TODO 일단 퍼퍼를 1000 으로 둠
-	// TODO n 을 향후에는 조정하자. 각 노드의 수로 채널 버퍼를 지정할 수 없다. 또한 그럴 필요도 없을 수도 있다.
-	dag.RunningStatus = make(chan *printStatus, 1000)
+	// TODO check
+	dag.RunningStatus = make(chan *printStatus, Max)
 
 	return dag
 }
