@@ -641,7 +641,7 @@ func (dag *Dag) DisableTimeout() {
 func (dag *Dag) AddCommand(id, cmd string) (node *Node) {
 	node = nil
 	if n, b := nodeExist(dag, id); b == true {
-		n.commands = cmd
+		n.Commands = cmd
 	}
 	return
 }

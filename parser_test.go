@@ -20,7 +20,7 @@ func TestXmlProcess(t *testing.T) {
 		for _, f := range node.from {
 			fmt.Println("From", f)
 		}
-		fmt.Println("Command ", node.commands)
+		fmt.Println("Command ", node.Commands)
 
 	}
 }
@@ -49,7 +49,7 @@ func TestXmlsProcess(t *testing.T) {
 			for _, f := range node.from {
 				fmt.Println("From", f)
 			}
-			fmt.Println("Command ", node.commands)
+			fmt.Println("Command ", node.Commands)
 
 		}
 	}

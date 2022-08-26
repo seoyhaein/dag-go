@@ -18,7 +18,7 @@ type Node struct {
 	children  []*Node // children
 	parent    []*Node // parents
 	parentDag *Dag    // 자신이 소속되어 있는 Dag
-	commands  string
+	Commands  string
 	//status         string
 	childrenVertex []chan runningStatus
 	parentVertex   []chan runningStatus

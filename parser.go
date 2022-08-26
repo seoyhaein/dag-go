@@ -213,7 +213,7 @@ func xmlProcess(parser *xml.Decoder) (int, []*Node) {
 				if n != nil {
 					if cmdStart {
 						// TODO string converting 바꾸기
-						n.commands = string(t)
+						n.Commands = string(t)
 					}
 					if fromStart {
 						n.from = append(n.from, string(t))
