@@ -39,7 +39,7 @@ func TestSimpleDag(t *testing.T) {
 	assert.Equal(true, b1, "true")
 
 	// 에러 발생하게 했다.
-	b2 := dag.WaitTilOver(ctx)
+	b2 := dag.Wait(ctx)
 	assert.Equal(true, b2, "true")
 
 }

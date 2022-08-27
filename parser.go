@@ -56,7 +56,7 @@ func xmlParser(x []*Node) (context.Context, bool, *Dag) {
 		dag.GetReady(ctx)
 		//dag.start()
 
-		//b := dag.waitTilOver(nil)
+		//b := dag.Wait(nil)
 		//fmt.Println("모든 고루틴이 종료될때까지 그냥 기다림.")
 		//fmt.Printf("true 이면 정상 : %t", b)
 

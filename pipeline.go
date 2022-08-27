@@ -38,7 +38,7 @@ func (pipe *Pipeline) Start(ctx context.Context) {
 		d.DagSetFunc()
 		d.GetReady(ctx)
 		d.Start()
-		d.WaitTilOver(ctx)
+		d.Wait(ctx)
 	}
 }
 

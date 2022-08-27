@@ -542,10 +542,10 @@ func (dag *Dag) Start() bool {
 	return true
 }
 
-// WaitTilOver waits until all channels are closed. RunningStatus channel has multiple senders and one receiver
+// Wait waits until all channels are closed. RunningStatus channel has multiple senders and one receiver
 // Closing a channel on a receiver violates the general channel close principle.
-// However, when waitTilOver terminates, it seems safe to close the channel here because all tasks are finished.
-func (dag *Dag) WaitTilOver(ctx context.Context) bool {
+// However, when Wait terminates, it seems safe to close the channel here because all tasks are finished.
+func (dag *Dag) Wait(ctx context.Context) bool {
 	defer close(dag.RunningStatus)
 
 	for {

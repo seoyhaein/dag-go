@@ -245,7 +245,7 @@ func TestXmlParser(t *testing.T) {
 
 	if b {
 		dag.Start()
-		dag.WaitTilOver(ctx)
+		dag.Wait(ctx)
 	}
 
 }

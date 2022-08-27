@@ -36,7 +36,7 @@ type Node struct {
 }
 
 // Debug 목적으로 스택? 두개 만들어서 채널에서 보내는 값과, 받는  값각각 넣어서 비교해본다.
-// (do not erase) close 해주는 것 : func (dag *Dag) waitTilOver(ctx context.Context) bool  에서 defer close(dag.RunningStatus) 해줌
+// (do not erase) close 해주는 것 : func (dag *Dag) Wait(ctx context.Context) bool  에서 defer close(dag.RunningStatus) 해줌
 // (do not erase) 너무 중요.@@@@ 채널 close 방식 확인하자. https://go101.org/article/channel-closing.html 너무 좋은 자료. 왜 제목을 101 이라고 했지 중급이상인데.
 // setFunc commit by seoy
 func setFunc(n *Node) {
