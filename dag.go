@@ -518,10 +518,6 @@ func (dag *Dag) GetReady(ctx context.Context) bool {
 	return true
 }
 
-/*func (dag *Dag) SetCreateImageFunc(f func(n *Node) *string) {
-	dag.ContainerCmd = f
-}*/
-
 // Start start_node has one vertex. That is, it has only one channel and this channel is not included in the edge.
 // It is started by sending a value to this channel when starting the dag's operation.
 func (dag *Dag) Start() bool {
