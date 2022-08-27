@@ -136,12 +136,13 @@ const (
 	Created   ContainerStatus = iota //0
 	Running                          // 1
 	Exited                           // 2
-	Healthy                          // 3
-	Unhealthy                        // 4
-	Dead                             // 5
-	Paused                           // 6
-	UnKnown                          // 7
-	None                             // 8
+	ExitedErr                        // 3
+	Healthy                          // 4
+	Unhealthy                        // 5
+	Dead                             // 6
+	Paused                           // 7
+	UnKnown                          // 8
+	None                             // 9
 )
 
 // channel buffer size

@@ -233,9 +233,16 @@ func (Res *CreateContainerResult) HealthCheck(ctx context.Context, interval stri
 						close(res.ch)
 						return
 					}
-					res.ch <- Exited
-					close(res.ch)
-					return
+					if containerData.State.Status == "exited" {
+						if containerData.State.ExitCode != 0 {
+							res.ch <- ExitedErr
+							close(res.ch)
+							return
+						}
+						res.ch <- Exited
+						close(res.ch)
+						return
+					}
 				} else { // running 상태
 					if healthCheck.Status == "healthy" {
 						res.ch <- Healthy
@@ -311,6 +318,10 @@ func (Res *CreateContainerResult) RunT(ctx context.Context, interval string) Con
 		}
 		if c == Exited {
 			return Exited
+		}
+
+		if c == ExitedErr {
+			return ExitedErr
 		}
 		if c == Dead {
 			return Dead

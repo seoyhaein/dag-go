@@ -625,7 +625,7 @@ github.com/rivo/uniseg
 # github.com/seccomp/libseccomp-golang v0.10.0
 ## explicit; go 1.14
 github.com/seccomp/libseccomp-golang
-# github.com/seoyhaein/podbridge v0.0.0-20220827085152-02a5d0ff68c7
+# github.com/seoyhaein/podbridge v0.0.0-20220827100512-05ef47056db1
 ## explicit; go 1.18
 github.com/seoyhaein/podbridge
 github.com/seoyhaein/podbridge/imageV1
