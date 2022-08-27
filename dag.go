@@ -227,8 +227,7 @@ func (dag *Dag) createNode(id string) *Node {
 	return node
 }
 
-// error log 는 일단 여기서만 작성
-
+//AddEdge error log 는 일단 여기서만 작성
 func (dag *Dag) AddEdge(from, to string) error {
 
 	if from == to {
