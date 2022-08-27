@@ -81,7 +81,7 @@ func (c *Container) CreateImage(a interface{}, healthChecker string) error {
 	return nil
 }
 
-// 각 노드의 이미지를 가지고 container 를 만들어줌.
+//createContainer 각 노드의 이미지를 가지고 container 를 만들어줌. TODO 수정한다.
 func createContainer(ctx context.Context, n *Node) int {
 	// spec 만들기
 	conSpec := pbr.NewSpec()
