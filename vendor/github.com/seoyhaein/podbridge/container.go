@@ -242,6 +242,8 @@ func (Res *CreateContainerResult) HealthCheck(ctx context.Context, interval stri
 					}
 					if healthCheck.Status == "unhealthy" {
 						res.ch <- Unhealthy
+						close(res.ch)
+						return
 					}
 				}
 			case <-ctx.Done():

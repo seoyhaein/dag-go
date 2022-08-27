@@ -479,7 +479,7 @@ github.com/klauspost/compress/zstd/internal/xxhash
 # github.com/klauspost/pgzip v1.2.5
 ## explicit
 github.com/klauspost/pgzip
-# github.com/letsencrypt/boulder v0.0.0-20220825233002-31c57b7f7022
+# github.com/letsencrypt/boulder v0.0.0-20220826211333-4d40b49ad3de
 ## explicit; go 1.18
 github.com/letsencrypt/boulder/core
 github.com/letsencrypt/boulder/core/proto
@@ -625,7 +625,7 @@ github.com/rivo/uniseg
 # github.com/seccomp/libseccomp-golang v0.10.0
 ## explicit; go 1.14
 github.com/seccomp/libseccomp-golang
-# github.com/seoyhaein/podbridge v0.0.0-20220826090714-89736940e4b4
+# github.com/seoyhaein/podbridge v0.0.0-20220827085152-02a5d0ff68c7
 ## explicit; go 1.18
 github.com/seoyhaein/podbridge
 github.com/seoyhaein/podbridge/imageV1
@@ -690,7 +690,7 @@ github.com/ulikunitz/xz/lzma
 github.com/vbatts/tar-split/archive/tar
 github.com/vbatts/tar-split/tar/asm
 github.com/vbatts/tar-split/tar/storage
-# github.com/vbauerster/mpb/v7 v7.5.0
+# github.com/vbauerster/mpb/v7 v7.5.2
 ## explicit; go 1.14
 github.com/vbauerster/mpb/v7
 github.com/vbauerster/mpb/v7/cwriter
@@ -728,7 +728,7 @@ go.opencensus.io/internal
 go.opencensus.io/trace
 go.opencensus.io/trace/internal
 go.opencensus.io/trace/tracestate
-# golang.org/x/crypto v0.0.0-20220824171710-5757bc0c5503
+# golang.org/x/crypto v0.0.0-20220826181053-bd7e27e6170d
 ## explicit; go 1.17
 golang.org/x/crypto/blowfish
 golang.org/x/crypto/cast5
@@ -754,7 +754,7 @@ golang.org/x/crypto/ssh
 golang.org/x/crypto/ssh/agent
 golang.org/x/crypto/ssh/internal/bcrypt_pbkdf
 golang.org/x/crypto/ssh/knownhosts
-# golang.org/x/net v0.0.0-20220822230855-b0a4917ee28c
+# golang.org/x/net v0.0.0-20220826154423-83b083e8dc8b
 ## explicit; go 1.17
 golang.org/x/net/context
 golang.org/x/net/http/httpguts
