@@ -3,6 +3,7 @@ package dag_go
 import (
 	"context"
 	"fmt"
+	"golang.org/x/sync/errgroup"
 	"time"
 
 	"github.com/google/uuid"
@@ -120,7 +121,7 @@ func (dag *Dag) createEdgeT(parentId, childId string) (*Edge, createEdgeErrorTyp
 
 				return cm, Create
 			}
-		} else { // parentId 가 다를 경우
+		} else {                      // parentId 가 다를 경우
 			if v.childId == childId { // childId 같을 경우
 				cm := new(Edge)
 				cm.parentId = parentId
@@ -475,24 +476,21 @@ func (dag *Dag) BeforeGetReady(ctx context.Context, healthChecker string) {
 		panic("ContainerCmd is not set")
 	}
 
-	//eg, _ := errgroup.WithContext(ctx)
+	eg, _ := errgroup.WithContext(ctx)
 
 	for _, v := range dag.nodes {
-
-		//	hc := healthChecker
-		//	eg.Go(func() error {
-		err := dag.ContainerCmd.CreateImage(v, healthChecker)
-		if err != nil {
-			return
-		}
-		//		return err
-		//	})
+		eg.Go(func() error {
+			err := dag.ContainerCmd.CreateImage(v, healthChecker)
+			if err != nil {
+				return nil
+			}
+			return err
+		})
 	}
-
-	//err := eg.Wait()
-	//if err != nil {
-	//	panic(err)
-	//}
+	err := eg.Wait()
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (dag *Dag) GetReady(ctx context.Context) bool {
