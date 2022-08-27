@@ -121,7 +121,7 @@ func (dag *Dag) createEdgeT(parentId, childId string) (*Edge, createEdgeErrorTyp
 
 				return cm, Create
 			}
-		} else {                      // parentId 가 다를 경우
+		} else { // parentId 가 다를 경우
 			if v.childId == childId { // childId 같을 경우
 				cm := new(Edge)
 				cm.parentId = parentId
