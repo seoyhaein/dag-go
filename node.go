@@ -128,13 +128,12 @@ func inFlight(ctx context.Context, n *Node) *printStatus {
 	if n.Id == StartNode || n.Id == EndNode {
 		bResult = true
 	} else { // TODO debug 모드때문에 넣어 놓았음. AddEdge 하면 commands. 안들어감. 추후 삭제하거나, 다른 방향으로 작성해야함.
-		Log.Println(n.Id)
 
 		// 성골할때만 명령을 실행시키고, 실패할경우는 채널에 값만 흘려 보낸다.
 		// TODO 리턴 코드 작성하자.
 		if n.succeed {
-			_, err := n.Execute()
-
+			r, err := n.Execute()
+			Log.Println(n.Id, r)
 			if err != nil {
 				Log.Println("실패")
 				bResult = false
