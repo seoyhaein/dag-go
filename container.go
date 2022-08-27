@@ -34,12 +34,30 @@ func (c *Container) RunE(a interface{}) (int, error) {
 	n, ok := a.(*Node)
 	if ok {
 		r := createContainer(c.Context, n)
+		// 정상적인 종료
+		if r == 2 {
+			return r, nil
+		}
+		if r == 3 {
+			return 3, fmt.Errorf("cannot execute container")
+		}
+		if r == 5 {
+			return 5, fmt.Errorf("unhealthy")
+		}
+		if r == 6 {
+			return 6, fmt.Errorf("container dead")
+		}
+		/*if r == 7 {
+			return 7, fmt.Errorf("pause")
+		}*/
 		if r == 8 {
 			return 8, fmt.Errorf("node's ImageNme is empty")
 		}
-		return r, nil
+		if r == 9 {
+			return 9, fmt.Errorf("none")
+		}
 	}
-	return 8, fmt.Errorf("RunE failed")
+	return 9, fmt.Errorf("none")
 }
 
 // CreateImage TODO healthCheckr 의 empty 검사만 하지만 실제로 healthchecker.sh 가 있는지 파악하는 구문 들어갈지 생각하자.
