@@ -24,8 +24,8 @@ type Node struct {
 	parentVertex   []chan runningStatus
 	runner         func(ctx context.Context, n *Node, result chan *printStatus)
 	// for xml parsing
-	from []string
-	to   []string
+	//from []string
+	//to   []string
 	// TODO re-thinking
 	// https://yoongrammer.tistory.com/36
 	context.Context
