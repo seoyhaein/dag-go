@@ -28,9 +28,9 @@ type Node struct {
 	//to   []string
 	// TODO re-thinking
 	// https://yoongrammer.tistory.com/36
-	context.Context
+	//context.Context
 	// 추후 commands string 과 교체
-	bashCommand []string
+	//bashCommand []string
 	// 추가
 	succeed bool
 }
