@@ -46,10 +46,10 @@ func setFunc(n *Node) {
 
 		result <- r
 		//TODO 특정 노드가 실패하면 여기서 빠져 나가야 할 것 같다.
-		r = inFlight(ctx, n)
+		r = inFlight(n)
 		result <- r
 		//TODO 특정 노드가 실패하면 여기서 빠져 나가야 할 것 같다.
-		r = postFlight(ctx, n)
+		r = postFlight(n)
 		result <- r
 		//TODO 특정 노드가 실패하면 여기서 빠져 나가야 할 것 같다.
 	}
@@ -109,7 +109,7 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 
 // inFlight preFlight, inFlight, postFlight 에서의 node 는 같은 노드이다.
 // runner 에서 순차적으로 동작한다.
-func inFlight(ctx context.Context, n *Node) *printStatus {
+func inFlight(n *Node) *printStatus {
 	if n == nil {
 		panic(fmt.Errorf("node is nil"))
 		//return &printStatus{InFlightFailed, noNodeId}
@@ -122,12 +122,11 @@ func inFlight(ctx context.Context, n *Node) *printStatus {
 	if n.Id == EndNode {
 		Log.Println("end all tasks", n.Id)
 	}
-
-	var bResult = false
-
+	//var bResult = false
 	if n.Id == StartNode || n.Id == EndNode {
-		bResult = true
-	} else { // TODO debug 모드때문에 넣어 놓았음. AddEdge 하면 commands. 안들어감. 추후 삭제하거나, 다른 방향으로 작성해야함.
+		//bResult = true
+		n.succeed = true
+	} else {
 		// 성골할때만 명령을 실행시키고, 실패할경우는 채널에 값만 흘려 보낸다.
 		// TODO 리턴 코드 작성하자.
 		if n.succeed {
@@ -135,15 +134,14 @@ func inFlight(ctx context.Context, n *Node) *printStatus {
 			Log.Println(n.Id, r)
 			if err != nil {
 				Log.Println("실패")
-				bResult = false
+				//bResult = false
 				n.succeed = false
 			} else {
 				n.succeed = true
 			}
 		}
 	}
-
-	if bResult {
+	if n.succeed {
 		return &printStatus{InFlight, n.Id}
 	} else {
 		return &printStatus{InFlightFailed, n.Id}
@@ -152,7 +150,7 @@ func inFlight(ctx context.Context, n *Node) *printStatus {
 
 // postFlight preFlight, inFlight, postFlight 에서의 node 는 같은 노드이다.
 // runner 에서 순차적으로 동작한다.
-func postFlight(ctx context.Context, n *Node) *printStatus {
+func postFlight(n *Node) *printStatus {
 	if n == nil {
 		panic(fmt.Errorf("node is nil"))
 		//return &printStatus{PostFlightFailed, noNodeId}
@@ -176,7 +174,6 @@ func postFlight(ctx context.Context, n *Node) *printStatus {
 			close(c)
 		}
 	}
-
 	return &printStatus{PostFlight, n.Id}
 }
 
