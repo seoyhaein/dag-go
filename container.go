@@ -102,7 +102,7 @@ func createContainer(ctx context.Context, n *Node) int {
 	// container 만들기
 	r := pbr.CreateContainer(ctx, conSpec)
 	fmt.Println("container Id is :", r.ID)
-	result := r.RunT(ctx, "1s")
+	result := r.Run(ctx, "1s")
 
 	v := int(result)
 	return v

@@ -147,10 +147,6 @@ github.com/containers/common/pkg/manifests
 github.com/containers/common/pkg/parse
 github.com/containers/common/pkg/retry
 github.com/containers/common/pkg/seccomp
-github.com/containers/common/pkg/secrets
-github.com/containers/common/pkg/secrets/filedriver
-github.com/containers/common/pkg/secrets/passdriver
-github.com/containers/common/pkg/secrets/shelldriver
 github.com/containers/common/pkg/signal
 github.com/containers/common/pkg/subscriptions
 github.com/containers/common/pkg/supplemented
@@ -257,7 +253,6 @@ github.com/containers/podman/v4/pkg/copy
 github.com/containers/podman/v4/pkg/domain/entities
 github.com/containers/podman/v4/pkg/domain/entities/reports
 github.com/containers/podman/v4/pkg/domain/entities/types
-github.com/containers/podman/v4/pkg/domain/utils
 github.com/containers/podman/v4/pkg/errorhandling
 github.com/containers/podman/v4/pkg/inspect
 github.com/containers/podman/v4/pkg/namespaces
@@ -398,9 +393,6 @@ github.com/docker/go-metrics
 # github.com/docker/go-units v0.4.0
 ## explicit
 github.com/docker/go-units
-# github.com/dtylman/scp v0.0.0-20220201143837-3fe2c6f3fee9
-## explicit; go 1.17
-github.com/dtylman/scp
 # github.com/fsnotify/fsnotify v1.5.4
 ## explicit; go 1.16
 github.com/fsnotify/fsnotify
@@ -625,7 +617,7 @@ github.com/rivo/uniseg
 # github.com/seccomp/libseccomp-golang v0.10.0
 ## explicit; go 1.14
 github.com/seccomp/libseccomp-golang
-# github.com/seoyhaein/podbridge v0.0.0-20220827100512-05ef47056db1
+# github.com/seoyhaein/podbridge v0.0.0-20220828090059-60c803d9a284
 ## explicit; go 1.18
 github.com/seoyhaein/podbridge
 github.com/seoyhaein/podbridge/imageV1

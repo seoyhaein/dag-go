@@ -108,5 +108,18 @@ func main() {
 
 ```
 
+### 메모
+```
+// https://acet.pe.kr/935
+// image id 확인
+
+podman images --no-trunc
+
+// 사용중인 container 가 검색이 안될때
+podman ps --all --storage
+
+// 모두 지우기
+podman rmi --force -a
+```
 ### TODO
 - types.SystemContext 관련해서 소스 분석해서 자세한 내용 파악.

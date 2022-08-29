@@ -26,7 +26,6 @@ type VolumeConfig struct {
 
 func CreateNamedVolume(ctx context.Context, conf ...*VolumeConfig) ([]*specgen.NamedVolume, error) {
 	var results []*specgen.NamedVolume
-
 	for _, v := range conf {
 		volumeConfigResponse, err := volumes.Create(ctx, v.VolumeCreateOptions, &volumes.CreateOptions{})
 
@@ -39,11 +38,8 @@ func CreateNamedVolume(ctx context.Context, conf ...*VolumeConfig) ([]*specgen.N
 		namedVol.Name = volumeConfigResponse.Name
 		namedVol.Dest = v.Dest
 		// TODO option setting
-
-		// append 사용의 꼼수.
 		results = append(results, namedVol)
 	}
-
 	return results, nil
 }
 

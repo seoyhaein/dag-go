@@ -11,6 +11,9 @@ import (
 	"github.com/seoyhaein/utils"
 )
 
+// TODO Habor 랑 연동하는 문제 생각해보자
+// https://github.com/containers/podman/issues/13145
+
 type (
 	SpecGen *specgen.SpecGenerator
 
@@ -27,14 +30,14 @@ type (
 	}
 )
 
-// NewSpec
+// NewSpec ContainerSpec 을 생성한다.
 func NewSpec() *ContainerSpec {
 	return &ContainerSpec{
 		Spec: new(specgen.SpecGenerator),
 	}
 }
 
-// SetImage
+// SetImage 해당 이미지를 spec 에 등록한다.
 func (c *ContainerSpec) SetImage(imgName string) *ContainerSpec {
 	if utils.IsEmptyString(imgName) {
 		return nil
@@ -44,13 +47,13 @@ func (c *ContainerSpec) SetImage(imgName string) *ContainerSpec {
 	return c
 }
 
-// SetOther
+// SetOther Spec 옵션을 적용하도록 돕는다.
 func (c *ContainerSpec) SetOther(f func(spec SpecGen) SpecGen) *ContainerSpec {
 	c.Spec = f(c.Spec)
 	return c
 }
 
-// SetHealthChecker
+// SetHealthChecker HealthChecker 를 등록한다.
 func (c *ContainerSpec) SetHealthChecker(inCmd, interval string, retries uint, timeout, startPeriod string) *ContainerSpec {
 	// cf. SetHealthChecker("CMD-SHELL /app/healthcheck.sh", "2s", 3, "30s", "1s")
 	healthConfig, err := SetHealthChecker(inCmd, interval, retries, timeout, startPeriod)
@@ -62,7 +65,6 @@ func (c *ContainerSpec) SetHealthChecker(inCmd, interval string, retries uint, t
 }
 
 // CreateContainer
-// TODO 수정해줘야 함. name, image 확인해야 할듯, 일단 체크 해보자.
 func CreateContainer(ctx context.Context, conSpec *ContainerSpec) *CreateContainerResult {
 	var (
 		result                 *CreateContainerResult
@@ -73,6 +75,12 @@ func CreateContainer(ctx context.Context, conSpec *ContainerSpec) *CreateContain
 	if err != nil {
 		panic(err)
 	}
+
+	// 컨테이너 이름과 이미지가 설정이 단되면 panic 으로 일단 처리함.
+	if utils.IsEmptyString(conSpec.Spec.Name) || utils.IsEmptyString(conSpec.Spec.Image) {
+		panic("container name or image's name is not set")
+	}
+
 	containerExistsOptions.External = utils.PFalse
 	containerExists, err := containers.Exists(ctx, conSpec.Spec.Name, &containerExistsOptions)
 	if err != nil {
@@ -104,7 +112,6 @@ func CreateContainer(ctx context.Context, conSpec *ContainerSpec) *CreateContain
 		if err != nil {
 			panic(err)
 		}
-		// TODO basket 에 넣을지 고민하자.
 		if imageExists == false {
 			_, err := images.Pull(ctx, conSpec.Spec.Image, &images.PullOptions{})
 			if err != nil {
@@ -140,7 +147,7 @@ func (Res *CreateContainerResult) Start(ctx context.Context) error {
 	}
 }
 
-// ReStart 중복되는 것 같긴하다. 수정해줘야 한다. ReStart
+// ReStart 중복되는 것 같긴하다. TODO 수정해줘야 한다. ReStart
 func (Res *CreateContainerResult) ReStart(ctx context.Context) error {
 	if utils.IsEmptyString(Res.ID) == false && Res.Status != Running {
 		err := containers.Start(ctx, Res.ID, &containers.StartOptions{})
@@ -151,7 +158,6 @@ func (Res *CreateContainerResult) ReStart(ctx context.Context) error {
 }
 
 // Stop
-// TODO 추후 수정하자.
 // https://docs.podman.io/en/latest/_static/api.html?version=v4.1#operation/ContainerStopLibpod
 // default 값은 timeout 은  10 으로 세팅되어 있고, ignore 는 false 이다.
 // ignore 는 만약 stop 된 컨테이너를 stop 되어 있을 때 stop 하는 경우 true 하면 에러 무시, false 로 하면 에러 리턴
@@ -169,7 +175,6 @@ func (Res *CreateContainerResult) Stop(ctx context.Context, options ...any) erro
 			}
 		}
 	}
-
 	err := containers.Stop(ctx, Res.ID, stopOption)
 	return err
 }
@@ -262,44 +267,8 @@ func (Res *CreateContainerResult) HealthCheck(ctx context.Context, interval stri
 	}(ctx, Res)
 }
 
-// Run 테스트 필요
-func (Res *CreateContainerResult) Run(ctx context.Context, interval string) <-chan ContainerStatus {
-	out := make(chan ContainerStatus, Max)
-	err := Res.Start(ctx)
-	if err != nil {
-		panic(err)
-	}
-	Res.HealthCheck(ctx, interval)
-
-	go func(in chan ContainerStatus, out chan ContainerStatus) {
-		defer close(out)
-		for c := range in {
-			if c == Unhealthy {
-				out <- Unhealthy
-			}
-			if c == Healthy {
-				out <- Healthy
-			}
-			if c == UnKnown {
-				out <- UnKnown
-			}
-			if c == Exited {
-				out <- Exited
-			}
-			if c == Dead {
-				out <- Dead
-			}
-			if c == Paused {
-				out <- Paused
-			}
-			out <- None
-		}
-	}(Res.ch, out)
-
-	return out
-}
-
-func (Res *CreateContainerResult) RunT(ctx context.Context, interval string) ContainerStatus {
+// Run container 의 Start 와 함께 HealthCheck 도 함께 하도록 한다.
+func (Res *CreateContainerResult) Run(ctx context.Context, interval string) ContainerStatus {
 	err := Res.Start(ctx)
 	if err != nil {
 		panic(err)
@@ -326,19 +295,9 @@ func (Res *CreateContainerResult) RunT(ctx context.Context, interval string) Con
 		if c == Dead {
 			return Dead
 		}
-		/*if c == Paused {
+		if c == Paused {
 			return Paused
-		}*/
+		}
 	}
 	return None
 }
-
-// 이미지 가존재하는지 확인하는 메서드 빼놓자.
-// TODO wait 함수 구체적으로 살펴보기기
-// 나머지들은 조금씩 구현해 나간다.
-// containers.go
-// TODO 중요 resource 관련
-// https://github.com/containers/podman/issues/13145
-// 명령어에 대한 heartbeat 관련 해서 처리 해야함.
-// TODO 컨테이너의 상태를 확인하는 방법은 두가지 접근 방법이 있는데, local에 podman 이 설치 되어 있는 경우와, 원격(접속하는 머신에는 podman  이없음)에서 연결되는 경우
-// 일단 먼저, local 에서 연결 하는 걸 적용한다. 구현하는 건 비교적 간단할 듯하다.

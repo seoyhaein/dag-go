@@ -47,7 +47,6 @@ require (
 	github.com/docker/go-connections v0.4.1-0.20210727194412-58542c764a11 // indirect
 	github.com/docker/go-metrics v0.0.1 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
-	github.com/dtylman/scp v0.0.0-20220201143837-3fe2c6f3fee9 // indirect
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
 	github.com/fsouza/go-dockerclient v1.8.3 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect

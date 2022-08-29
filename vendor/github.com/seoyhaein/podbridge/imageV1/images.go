@@ -18,17 +18,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// https://acet.pe.kr/935
-
-// image id 확인
-// podman images --no-trunc
-
-// 사용중인 container 가 검색이 안될때
-// podman ps --all --storage
-
-// 모두 지우기
-// podman rmi --force -a
-
 var (
 	digester = digest.Canonical.Digester()
 	log      = logrus.New()
@@ -230,10 +219,6 @@ func (b *Builder) CommitImage(ctx context.Context, preferredManifestType string,
 		SystemContext:         sysCtx,
 	})
 
-	// import cycle 때문에 삭제함.
-	/*if pbr.Basket != nil {
-		pbr.Basket.AddImagesId(imageId)
-	}*/
 	return &imageId, err
 }
 
