@@ -467,9 +467,9 @@ func (dag *Dag) DagSetFunc() bool {
 	return true
 }
 
-// BeforeGetReady 이건 컨테이너 전용- 이미지 생성할때 고루틴 돌리니 에러 발생..
+// BeforeGetReadyT 이건 컨테이너 전용- 이미지 생성할때 고루틴 돌리니 에러 발생..
 // TODO check ContainerCmd
-func (dag *Dag) BeforeGetReady(ctx context.Context, healthChecker string) {
+func (dag *Dag) BeforeGetReadyT(ctx context.Context, healthChecker string) {
 
 	if dag.ContainerCmd == nil {
 		panic("ContainerCmd is not set")
@@ -489,6 +489,20 @@ func (dag *Dag) BeforeGetReady(ctx context.Context, healthChecker string) {
 	err := eg.Wait()
 	if err != nil {
 		panic(err)
+	}
+}
+
+func (dag *Dag) BeforeGetReady(ctx context.Context, healthChecker string) {
+
+	if dag.ContainerCmd == nil {
+		panic("ContainerCmd is not set")
+	}
+
+	for _, v := range dag.nodes {
+		err := dag.ContainerCmd.CreateImage(v, healthChecker)
+		if err != nil {
+			panic(err)
+		}
 	}
 }
 
