@@ -100,7 +100,7 @@ func (c *Container) CreateImageT(a interface{}, healthChecker string) error {
 		}
 		n.ImageName = *nodeImage
 	}
-	return nil
+	return fmt.Errorf("cannot create node image")
 }
 
 //createContainer 각 노드의 이미지를 가지고 container 를 만들어줌. TODO 수정한다.
