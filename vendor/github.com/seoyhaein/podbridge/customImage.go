@@ -18,75 +18,7 @@ import (
 // 3. /app/healthcheck 폴더를 만들어줌.
 // 4. /app/healthcheck 여기에 executor.sh 를 집어 넣어줌.
 // TODO 데이터 넣는 것도 구현되어야 함. BaseImage 를 만들자.
-func CreateCustomImage(imageName, baseImage, cmd string) *string {
-	if utils.IsEmptyString(imageName) {
-		return nil
-	}
-	var executorPath *string
-	// 이미지 만들고 생성한 file 삭제
-	// TODO MustFristCall 중복 호출에 대한 부분 check.
-	MustFirstCall()
-
-	if utils.IsEmptyString(baseImage) {
-		panic("baseImage is nil")
-	}
-
-	opt := v1.NewOption().Other().FromImage(baseImage)
-	ctx, builder, err := v1.NewBuilder(context.Background(), opt)
-
-	defer func() {
-		builder.Shutdown()
-		builder.Delete()
-	}()
-
-	if err != nil {
-		Log.Printf("NewBuilder error")
-		panic(err)
-	}
-
-	err = builder.WorkDir("/app")
-	if err != nil {
-		Log.Println("WorkDir")
-		panic(err)
-	}
-
-	// ADD/Copy 동일함.
-	// executor.sh 추가 해줌.
-	// TODO 여기서 고정으로 filename 고정시켜줘서 문제가 발생함.
-	// 컨테이너 안에서 바꿔주자.
-	_, executorPath, _ = genExecutorSh(".", "executor.sh", cmd)
-	defer func(path string) {
-		err := os.Remove(path)
-		if err != nil {
-			panic(err)
-		}
-	}(*executorPath)
-
-	err = builder.Add(*executorPath, "/app/healthcheck")
-	if err != nil {
-		Log.Println("Add error")
-		panic(err)
-	}
-
-	err = builder.Cmd("/app/healthcheck/executor.sh")
-	if err != nil {
-		Log.Println("cmd error")
-		panic(err)
-	}
-
-	// TODO 이부분 향후 이 임포트 숨기는 방향으로 간다.
-	sysCtx := &types.SystemContext{}
-	image, err := builder.CommitImage(ctx, buildah.Dockerv2ImageManifest, sysCtx, imageName)
-
-	if err != nil {
-		Log.Println("CommitImage error")
-		panic(err)
-	}
-
-	return image
-}
-
-func CreateCustomImageT(imageName, baseImage, filename, cmd string) *string {
+func CreateCustomImage(imageName, baseImage, filename, cmd string) *string {
 	if utils.IsEmptyString(imageName) || utils.IsEmptyString(filename) {
 		return nil
 	}
@@ -136,7 +68,7 @@ func CreateCustomImageT(imageName, baseImage, filename, cmd string) *string {
 		panic(err)
 	}
 
-	subCmd := fmt.Sprintf("mv /app/healthcheck/%s executor.sh", filename)
+	subCmd := fmt.Sprintf("mv /app/healthcheck/%s /app/healthcheck/executor.sh", filename)
 	err = builder.Run(subCmd)
 	if err != nil {
 		Log.Println("Run error")

@@ -1463,8 +1463,8 @@ github.com/secure-systems-lab/go-securesystemslib v0.3.1/go.mod h1:o8hhjkbNl2gOa
 github.com/secure-systems-lab/go-securesystemslib v0.4.0/go.mod h1:FGBZgq2tXWICsxWQW1msNf49F0Pf2Op5Htayx335Qbs=
 github.com/securego/gosec/v2 v2.9.1/go.mod h1:oDcDLcatOJxkCGaCaq8lua1jTnYf6Sou4wdiJ1n4iHc=
 github.com/segmentio/ksuid v1.0.4/go.mod h1:/XUiZBD3kVx5SmUOl55voK5yeAbBNNIed+2O73XgrPE=
-github.com/seoyhaein/podbridge v0.0.0-20220830082115-15c6a53f0693 h1:6Iny4lZt+JpfSzFJj+fG1KHGvObCcOoOTk309xtpLT4=
-github.com/seoyhaein/podbridge v0.0.0-20220830082115-15c6a53f0693/go.mod h1:Lfs19avrWoPPhcy/XlJjDiuzTtXMY9YibTxfghUBa4o=
+github.com/seoyhaein/podbridge v0.0.0-20220830095020-1b436ddf74ea h1:1JOjwtUwi5xcXk9g5UePFm52c8sHyRfDugRc/FVTN0k=
+github.com/seoyhaein/podbridge v0.0.0-20220830095020-1b436ddf74ea/go.mod h1:Lfs19avrWoPPhcy/XlJjDiuzTtXMY9YibTxfghUBa4o=
 github.com/seoyhaein/utils v0.0.0-20220822121450-b1609620be2f h1:T9ppGnjKDZDbS6RWg9+AP4gHcs9pP8H3rWf5ghT2bmw=
 github.com/seoyhaein/utils v0.0.0-20220822121450-b1609620be2f/go.mod h1:GbuJEHeip5mhOATE+Mpff47AskqKf5romuW49UVgITw=
 github.com/sergi/go-diff v1.0.0/go.mod h1:0CfEIISq7TuYL3j771MWULgwwjU+GofnZX9QAmXWZgo=
