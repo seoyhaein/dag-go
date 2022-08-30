@@ -80,6 +80,7 @@ func (c *Container) CreateImage(a interface{}, healthChecker string) error {
 			fmt.Errorf("cannot create node image")
 		}
 		n.ImageName = *nodeImage
+		return nil
 	}
 	return fmt.Errorf("cannot create node image")
 }
