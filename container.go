@@ -72,25 +72,6 @@ func (c *Container) CreateImage(a interface{}, healthChecker string) error {
 		if utils.IsEmptyString(c.BaseImage) {
 			c.BaseImage = pbr.CreateBaseImage(healthChecker)
 		}
-
-		nodeImage := pbr.CreateCustomImage(n.Id, c.BaseImage, n.Commands)
-		if nodeImage == nil {
-			fmt.Errorf("cannot create node image")
-		}
-		n.ImageName = *nodeImage
-	}
-	return nil
-}
-
-func (c *Container) CreateImageT(a interface{}, healthChecker string) error {
-	n, ok := a.(*Node)
-	if ok {
-		if utils.IsEmptyString(healthChecker) {
-			return fmt.Errorf("healthChecker is empty")
-		}
-		if utils.IsEmptyString(c.BaseImage) {
-			c.BaseImage = pbr.CreateBaseImage(healthChecker)
-		}
 		randStr := randSeq(5)
 		filename := fmt.Sprintf("%s%s", n.Id, randStr)
 
