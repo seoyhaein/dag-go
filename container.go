@@ -3,6 +3,7 @@ package dag_go
 import (
 	"context"
 	"fmt"
+	"math/rand"
 
 	pbr "github.com/seoyhaein/podbridge"
 	"github.com/seoyhaein/utils"
@@ -81,6 +82,27 @@ func (c *Container) CreateImage(a interface{}, healthChecker string) error {
 	return nil
 }
 
+func (c *Container) CreateImageT(a interface{}, healthChecker string) error {
+	n, ok := a.(*Node)
+	if ok {
+		if utils.IsEmptyString(healthChecker) {
+			return fmt.Errorf("healthChecker is empty")
+		}
+		if utils.IsEmptyString(c.BaseImage) {
+			c.BaseImage = pbr.CreateBaseImage(healthChecker)
+		}
+		randStr := randSeq(5)
+		filename := fmt.Sprintf("%s%s", n.Id, randStr)
+
+		nodeImage := pbr.CreateCustomImageT(n.Id, c.BaseImage, filename, n.Commands)
+		if nodeImage == nil {
+			fmt.Errorf("cannot create node image")
+		}
+		n.ImageName = *nodeImage
+	}
+	return nil
+}
+
 //createContainer 각 노드의 이미지를 가지고 container 를 만들어줌. TODO 수정한다.
 func createContainer(ctx context.Context, n *Node) int {
 	// spec 만들기
@@ -106,4 +128,16 @@ func createContainer(ctx context.Context, n *Node) int {
 
 	v := int(result)
 	return v
+}
+
+// add by seoy
+// https://stackoverflow.com/questions/22892120/how-to-generate-a-random-string-of-a-fixed-length-in-go/22892986#22892986
+var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+func randSeq(n int) string {
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(b)
 }
