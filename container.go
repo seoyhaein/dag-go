@@ -75,7 +75,7 @@ func (c *Container) CreateImage(a interface{}, healthChecker string) error {
 		randStr := randSeq(5)
 		filename := fmt.Sprintf("%s%s", n.Id, randStr)
 
-		nodeImage := pbr.CreateCustomImageT(n.Id, c.BaseImage, filename, n.Commands)
+		nodeImage := pbr.CreateCustomImage(n.Id, c.BaseImage, filename, n.Commands)
 		if nodeImage == nil {
 			fmt.Errorf("cannot create node image")
 		}
