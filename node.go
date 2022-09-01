@@ -276,7 +276,6 @@ func cloneGraph(ns map[string]*Node) (map[string]*Node, bool) {
 				for i, ch := range node.children { // TODO 테스트 진행해야 한다.
 					dupe.children[i], cycle = _cloneGraph(ch, visited)
 				}
-
 				// 부모의 정보를 입력한다.
 				dupe.Id = node.Id
 				//dupe.iterId = node.iterId
@@ -305,6 +304,13 @@ func createNode(id string, r Runnable) (node *Node) {
 	node = &Node{
 		Id:         id,
 		RunCommand: r,
+	}
+	return
+}
+
+func createNodeWithId(id string) (node *Node) {
+	node = &Node{
+		Id: id,
 	}
 	return
 }

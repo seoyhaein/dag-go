@@ -13,6 +13,7 @@ import (
 // Dag (Directed Acyclic Graph) is an acyclic graph, not a cyclic graph.
 // In other words, there is no cyclic cycle in the DAG algorithm, and it has only one direction.
 type Dag struct {
+	Pid   string
 	Id    string
 	Edges []*Edge
 
@@ -30,11 +31,7 @@ type Dag struct {
 	Timeout  time.Duration
 	bTimeout bool
 
-	// TODO 이름 추후 수정하자.
 	ContainerCmd Runnable
-
-	// 이미지를 만드는건 dag GetReady 에서 진행하도 록한다.
-	//CreateImage func(n *Node) *string
 }
 
 // Edge is a channel. It has the same meaning as the connecting line connecting the parent and child nodes.
@@ -73,10 +70,34 @@ func NewDag() *Dag {
 	return dag
 }
 
-func NewDagWithPId(pid string, n string, r Runnable) *Dag {
+func NewDagWithPIdT(pid string, n string, r Runnable) *Dag {
 	dag := new(Dag)
 	dag.nodes = make(map[string]*Node)
 	dag.Id = fmt.Sprintf("%s-%s", pid, n)
+	dag.validated = false
+
+	dag.StartNode = dag.createNode(StartNode)
+
+	// 시작할때 넣어주는 채널 여기서 세팅된다.
+	// error message : 중복된 node id 로 노드를 생성하려고 했습니다, createNode
+	if dag.StartNode == nil {
+		return nil
+	}
+	// 시작노드는 반드시 하나의 채널을 넣어 줘야 한다.
+	// start 함수에서 채널 값을 넣어준다.
+	dag.StartNode.parentVertex = append(dag.StartNode.parentVertex, make(chan runningStatus, Min))
+
+	// TODO check
+	dag.RunningStatus = make(chan *printStatus, Max)
+
+	return dag
+}
+
+func NewDagWithPId(dagId string, r Runnable) *Dag {
+	dag := new(Dag)
+	dag.nodes = make(map[string]*Node)
+	dag.Id = dagId
+	//dag.Id = fmt.Sprintf("%s-%s", pid, n)
 	dag.validated = false
 
 	dag.StartNode = dag.createNode(StartNode)
@@ -218,8 +239,14 @@ func (dag *Dag) createNode(id string) *Node {
 			return nil
 		}
 	}
-	// TODO 추가적으로 수정할 예정임.
-	node := createNode(id, dag.ContainerCmd)
+
+	var node *Node
+
+	if dag.ContainerCmd != nil {
+		node = createNode(id, dag.ContainerCmd)
+	} else {
+		node = createNodeWithId(id)
+	}
 
 	node.parentDag = dag
 	dag.nodes[id] = node
