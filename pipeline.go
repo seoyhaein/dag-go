@@ -28,7 +28,6 @@ func NewPipeline() *Pipeline {
 }
 
 // TODO 모든 dag 들을 실행 시킬 수 있어야 한다. 수정해줘야 한다
-
 func (pipe *Pipeline) Start(ctx context.Context) {
 	if pipe.Dags == nil {
 		return
