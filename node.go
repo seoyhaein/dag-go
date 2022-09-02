@@ -3,6 +3,7 @@ package dag_go
 import (
 	"context"
 	"fmt"
+	"github.com/seoyhaein/utils"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
@@ -297,6 +298,200 @@ func cloneGraph(ns map[string]*Node) (map[string]*Node, bool) {
 	}
 
 	return visited, iscycle
+}
+
+// CopyNodes 내일 테스트 해야함. dag.nodes 에 넣 어줬다. 이제 각각의 노드에 넣는 부분을 완성해야 한다.
+func CopyNodes(original *Dag, copied *Dag) (map[string]*Node, bool) {
+	num := len(original.nodes)
+	if num < 1 {
+		return nil, false
+	}
+	var nodes map[string]*Node
+	// 1. 먼저 모든 노드들을 복사한다. (노드자체 가존재하지 않을 수 있으므로 부모 자식 아직 추가 않해줌.)
+	for _, n := range original.nodes {
+		node := new(Node)
+		node.Id = n.Id
+		node.ImageName = n.ImageName
+		node.RunCommand = n.RunCommand
+		//TODO parentDag 는 포인터 이기때문에 이거는 나중에 check 해줘야 함.
+		node.parentDag = n.parentDag
+		node.Commands = n.Commands
+		node.runner = n.runner
+		node.succeed = n.succeed
+
+		nodes[copied.Id] = node
+	}
+	// 2. 부모 자식 노드들을 추가해줌.
+	for _, n := range original.nodes {
+		p := len(n.parent)
+		ch := len(n.children)
+		// 부모노드들을 추가한다.
+		for i := 0; i > p; i++ {
+			nodes[n.Id].parent = append(nodes[n.Id].parent, nodes[n.parent[i].Id])
+		}
+		// 자식 노드들을 추가한다.
+		for i := 0; i > ch; i++ {
+			nodes[n.Id].children = append(nodes[n.Id].children, nodes[n.children[i].Id])
+		}
+	}
+	// 3. Vertex(channel) 을 복사한다. TODO CopyEdge 를 해준다음에 해야한다. 이러한 제약조건을 넣어주어야 한다. 일단 구현먼저.
+	num = len(copied.Edges)
+	if num < 1 {
+		panic("edge is empty")
+	}
+	// TODO 내일 세부적으로 살펴보자. 채널을 임시로 수정해서(nodeId 넣고) 작성하고 완료 되면 수정된것을 지우자.
+	// 각 노드에 vertex 넣는것은?? 헷갈린다.
+	for _, e := range copied.Edges {
+		nodes[e.parentId].parentVertex = append(nodes[e.parentId].parentVertex, e.vertex)
+		nodes[e.childId].childrenVertex = append(nodes[e.childId].childrenVertex, e.vertex)
+	}
+
+	/*	for _, n := range original.nodes {
+		pv := len(n.parentVertex)
+		cv := len(n.childrenVertex)
+		// parentVertex 만들어줌.
+		for i := 0; i > pv; i++ {
+			vertex := make(chan runningStatus, Min)
+			nodes[n.Id].parentVertex = append(nodes[n.Id].parentVertex, vertex)
+		}
+		// childrenVertex 만들어줌.
+		for i := 0; i > cv; i++ {
+			vertex := make(chan runningStatus, Min)
+			nodes[n.Id].childrenVertex = append(nodes[n.Id].childrenVertex, vertex)
+		}
+	}*/
+
+	// 4. xml 을 위해 from, to 복사 해준다. (추후 없어질 수 있음.)
+	for _, n := range original.nodes {
+		for _, id := range n.from {
+			nodes[n.Id].from = append(nodes[n.Id].from, id)
+		}
+
+		for _, id := range n.to {
+			nodes[n.Id].to = append(nodes[n.Id].to, id)
+		}
+	}
+
+	return nodes, true
+}
+
+/*
+	Edges 			[]*Edge
+
+	nodes     		map[string]*Node
+	StartNode 		*Node
+	EndNode   		*Node
+	validated 		bool
+
+	RunningStatus 	chan *printStatus
+
+	// 에러를 모으는 용도.
+	errLogs 		[]*systemError
+
+	// timeout
+	Timeout  		time.Duration
+	bTimeout 		bool
+
+	ContainerCmd 	Runnable
+
+*/
+
+/*
+cm := new(Edge)
+	cm.parentId = parentId
+	cm.childId = childId
+	cm.vertex = make(chan runningStatus, Min)
+	dag.Edges = append(dag.Edges, cm)
+*/
+
+/*
+dag.validated = false
+	dag.StartNode = dag.createNode(StartNode)
+
+	// 시작할때 넣어주는 채널 여기서 세팅된다.
+	// error message : 중복된 node id 로 노드를 생성하려고 했습니다, createNode
+	if dag.StartNode == nil {
+		return nil
+	}
+	// 시작노드는 반드시 하나의 채널을 넣어 줘야 한다.
+	// start 함수에서 채널 값을 넣어준다.
+	dag.StartNode.parentVertex = append(dag.StartNode.parentVertex, make(chan runningStatus, Min))
+	// TODO check
+	dag.RunningStatus = make(chan *printStatus, Max)
+
+*/
+
+// CopyDag TODO 테스트 하자.
+func CopyDag(original *Dag) (copied *Dag) {
+	if original == nil {
+		return nil
+	}
+	copied = &Dag{}
+	// TODO check
+	copied.Id = original.Id
+	if utils.IsEmptyString(original.Pid) == false {
+		copied.Pid = original.Pid
+	}
+	copied.Edges = CopyEdge(original.Edges)
+	/*var edges int
+	edges = len(original.Edges)
+	// edge deep copy
+	for i := 0; i < edges; i++ {
+		e := new(Edge)
+		e.parentId = original.Edges[i].parentId
+		e.childId = original.Edges[i].childId
+		e.vertex = make(chan runningStatus, Min)
+		copied.Edges = append(copied.Edges, e)
+	}*/
+
+	// TODO cloneGraph 이번에 철저히 테스트 하자.
+	// original nodes 의 startnode, endnode 수정해줘야 함.
+	// 만약 성공적으로 deepcopy 가 되었다면 이 녀석을 찾아서 startNode 와 EndNode 에 넣자.
+	// cloneGraph 에서 dag.nodes 가 복사가 되면서 그곳에서 channel 은 생성되었지만 edge(vertex) 는 생성되지 않음.
+	ns, _ := cloneGraph(original.nodes)
+	copied.nodes = ns
+
+	// TODO StartNode, EndNode 설정 이건 테스트 해봐야 함.
+	for _, n := range ns {
+		if n.Id == StartNode {
+			copied.StartNode = n
+		}
+		if n.Id == EndNode {
+			copied.EndNode = n
+		}
+	}
+
+	copied.validated = original.validated
+
+	// TODO check 일단 주석처리함.
+	//copied.RunningStatus = make(chan *printStatus, Max)
+
+	// 생략 추후 넣어줌
+	// 에러를 모으는 용도.
+	//errLogs []*systemError
+
+	copied.Timeout = original.Timeout
+	copied.bTimeout = original.bTimeout
+
+	copied.ContainerCmd = original.ContainerCmd
+
+	return
+}
+
+func CopyEdge(original []*Edge) (copied []*Edge) {
+	edges := len(original)
+	if edges < 1 {
+		return nil
+	}
+	for i := 0; i > edges; i++ {
+		e := new(Edge)
+		e.parentId = original[i].parentId
+		e.childId = original[i].childId
+		e.vertex = make(chan runningStatus, Min)
+
+		copied[i] = e
+	}
+	return
 }
 
 // createNode add by seoy
