@@ -66,20 +66,7 @@ func xmlParser(x []*Node) (context.Context, bool, *Dag) {
 	return nil, false, nil
 }
 
-func findNode(ns []*Node, id string) *Node {
-
-	if ns == nil {
-		return nil
-	}
-
-	for _, n := range ns {
-		if n.Id == id {
-			return n
-		}
-	}
-
-	return nil
-}
+// TODO 함수들 정리해서 놓자.
 
 func xmlProcess(parser *xml.Decoder) (int, []*Node) {
 	var (

@@ -3,6 +3,7 @@ module github.com/seoyhaein/dag-go
 go 1.18
 
 require (
+	github.com/dlsniper/debugger v0.6.0
 	github.com/google/uuid v1.3.0
 	github.com/seoyhaein/podbridge v0.0.0-20220830095020-1b436ddf74ea
 	github.com/seoyhaein/utils v0.0.0-20220822121450-b1609620be2f

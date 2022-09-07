@@ -195,16 +195,6 @@ func (dag *Dag) createEdge(parentId, childId string) (*Edge, createEdgeErrorType
 
 }
 
-//findEdges 같은게 있으면 -1, 같은게 없으면 0
-func findEdges(es []*Edge, parentId, childId string) int {
-	for _, e := range es {
-		if e.parentId == parentId && e.childId == childId {
-			return -1
-		}
-	}
-	return 0
-}
-
 func (dag *Dag) getVertex(parentId, childId string) chan runningStatus {
 
 	for _, v := range dag.Edges {
@@ -314,7 +304,6 @@ func (dag *Dag) AddEdge(from, to string) error {
 		dag.errLogs = append(dag.errLogs, &systemError{AddEdge, err})
 		return err
 	}
-
 	return nil
 }
 
@@ -342,7 +331,6 @@ func (dag *Dag) addEndNode(fromNode, toNode *Node) error {
 	} else {
 		fmt.Errorf("vertex is nil")
 	}
-
 	return nil
 }
 
@@ -541,18 +529,6 @@ func (dag *Dag) GetReady(ctx context.Context) bool {
 	for _, v := range dag.nodes {
 		go v.runner(ctx, v, dag.RunningStatus)
 	}
-
-	// TODO check 이미지를 만드는 작업
-	// TODO goroutine 으로 돌려야 하지만 해당 goroutine 이 언제 끝나는지 파악해야 함으로 일단 그냥 돌린다.
-	/*if dag.CreateImage != nil {
-		for _, v := range dag.nodes {
-			f := dag.CreateImage
-
-			r := f(v)
-			Log.Println(*r)
-		}
-	}*/
-
 	return true
 }
 
@@ -569,7 +545,6 @@ func (dag *Dag) Start() bool {
 	go func(c chan runningStatus) {
 		ch := c
 		ch <- Start
-		// add by seoy, channel closing principle
 		close(ch)
 	}(dag.StartNode.parentVertex[0])
 
@@ -609,7 +584,7 @@ func (dag *Dag) Wait(ctx context.Context) bool {
 		} else {
 			select {
 			case c := <-dag.RunningStatus:
-				//printRunningStatus(c)
+				printRunningStatus(c)
 				if c.nodeId == EndNode {
 					if c.rStatus == PreflightFailed {
 						return false
@@ -629,18 +604,6 @@ func (dag *Dag) Wait(ctx context.Context) bool {
 			}
 		}
 	}
-
-}
-
-//printRunningStatus TODO context cancel 관련 해서 추가 해줘야 하고 start() 같은 경우도 처리 해줘야 한다.
-// 약간 이상한 모양인 데이걸 처리하는
-// TODO 나중에 수정해주자.
-func printRunningStatus(status *printStatus) {
-	if status == nil {
-		return
-	}
-	fmt.Printf("nodeId:%s, status:%d\n", status.nodeId, status.rStatus)
-
 }
 
 // 테스트 용으로 만듬.
@@ -680,16 +643,6 @@ func (dag *Dag) AddCommand(id, cmd string) (node *Node) {
 	return
 }
 
-// nodeExist returns true if node is in dag, false otherwise
-func nodeExist(dag *Dag, nodeId string) (*Node, bool) {
-	for _, n := range dag.nodes {
-		if n.Id == nodeId {
-			return n, true
-		}
-	}
-	return nil, false
-}
-
 // AddNodeToStartNode check
 // TODO 확인하자.
 func (dag *Dag) AddNodeToStartNode(to *Node) error {
@@ -725,4 +678,216 @@ func (dag *Dag) AddNodeToStartNode(to *Node) error {
 		Log.Println("error")
 	}
 	return nil
+}
+
+// copyDag 내일 테스트 해야함. dag.nodes 에 넣 어줬다. 이제 각각의 노드에 넣는 부분을 완성해야 한다.
+func copyDag(original *Dag) (map[string]*Node, []*Edge) {
+	num := len(original.nodes)
+	if num < 1 {
+		return nil, nil
+	}
+	var nodes map[string]*Node
+	nodes = make(map[string]*Node, len(original.nodes))
+
+	// 1. 먼저 모든 노드들을 복사한다. (노드자체 가존재하지 않을 수 있으므로 부모 자식 아직 추가 않해줌.)
+	for _, n := range original.nodes {
+		node := new(Node)
+		node.Id = n.Id
+		node.ImageName = n.ImageName
+		node.RunCommand = n.RunCommand
+		node.Commands = n.Commands
+		node.succeed = n.succeed
+
+		nodes[node.Id] = node
+	}
+	// 2. 부모 자식 노드들을 추가해줌.
+	for _, n := range original.nodes {
+		p := len(n.parent)
+		ch := len(n.children)
+		// 부모노드들을 추가한다.
+		for i := 0; i < p; i++ {
+			nodes[n.Id].parent = append(nodes[n.Id].parent, nodes[n.parent[i].Id])
+		}
+		// 자식 노드들을 추가한다.
+		for i := 0; i < ch; i++ {
+			nodes[n.Id].children = append(nodes[n.Id].children, nodes[n.children[i].Id])
+		}
+	}
+	// 3. Vertex(channel) 을 복사한다.
+	edges := CopyEdge(original.Edges)
+	num = len(edges)
+	if num > 0 {
+		for _, node := range nodes {
+			es := findEdgeFromParentId(edges, node.Id)
+			for _, e := range es {
+				node.childrenVertex = append(node.childrenVertex, e.vertex)
+			}
+			es = findEdgeFromChildId(edges, node.Id)
+			for _, e := range es {
+				node.parentVertex = append(node.parentVertex, e.vertex)
+			}
+		}
+	}
+
+	// 4. xml 을 위해 from, to 복사 해준다. (추후 없어질 수 있음.)
+	for _, n := range original.nodes {
+		for _, id := range n.from {
+			nodes[n.Id].from = append(nodes[n.Id].from, id)
+		}
+
+		for _, id := range n.to {
+			nodes[n.Id].to = append(nodes[n.Id].to, id)
+		}
+	}
+
+	return nodes, edges
+}
+
+// CopyDag TODO 테스트 하자.
+func CopyDag(original *Dag, Id string) (copied *Dag) {
+	if original == nil {
+		return nil
+	}
+	copied = &Dag{}
+
+	if utils.IsEmptyString(original.Pid) == false {
+		copied.Pid = original.Pid
+	}
+	if utils.IsEmptyString(Id) {
+		return nil
+	}
+	copied.Id = Id
+	ns, edges := copyDag(original)
+	copied.nodes = ns
+	copied.Edges = edges
+
+	for _, n := range ns {
+		n.parentDag = copied
+		if n.Id == StartNode {
+			copied.StartNode = n
+		}
+		if n.Id == EndNode {
+			copied.EndNode = n
+		}
+	}
+	copied.validated = original.validated
+	copied.RunningStatus = make(chan *printStatus, Max)
+	//TODO 생략 추후 넣어줌
+	// 에러를 모으는 용도.
+	//errLogs []*systemError
+	copied.Timeout = original.Timeout
+	copied.bTimeout = original.bTimeout
+	copied.ContainerCmd = original.ContainerCmd
+	return
+}
+
+func CopyEdge(original []*Edge) (copied []*Edge) {
+	edges := len(original)
+	if edges < 1 {
+		return nil
+	}
+	copied = make([]*Edge, edges)
+	for i := 0; i < edges; i++ {
+		e := new(Edge)
+		e.parentId = original[i].parentId
+		e.childId = original[i].childId
+		e.vertex = make(chan runningStatus, Min)
+
+		copied[i] = e
+	}
+	return
+}
+
+func findNode(ns []*Node, id string) *Node {
+	if ns == nil {
+		return nil
+	}
+	for _, n := range ns {
+		if n.Id == id {
+			return n
+		}
+	}
+	return nil
+}
+
+// nodeExist returns true if node is in dag, false otherwise
+func nodeExist(dag *Dag, nodeId string) (*Node, bool) {
+	for _, n := range dag.nodes {
+		if n.Id == nodeId {
+			return n, true
+		}
+	}
+	return nil, false
+}
+
+//findEdges 같은게 있으면 -1, 같은게 없으면 0
+func findEdges(es []*Edge, parentId, childId string) int {
+	for _, e := range es {
+		if e.parentId == parentId && e.childId == childId {
+			return -1
+		}
+	}
+	return 0
+}
+
+func findEdgeFromParentId(es []*Edge, Id string) []*Edge {
+	var r []*Edge
+	for _, e := range es {
+		if e.parentId == Id {
+			r = append(r, e)
+		}
+	}
+	return r
+}
+
+func findEdgeFromChildId(es []*Edge, Id string) []*Edge {
+	var r []*Edge
+	for _, e := range es {
+		if e.childId == Id {
+			r = append(r, e)
+		}
+	}
+	return r
+}
+
+//printRunningStatus TODO context cancel 관련 해서 추가 해줘야 하고 start() 같은 경우도 처리 해줘야 한다.
+// TODO 나중에 수정해주자.
+func printRunningStatus(status *printStatus) {
+	var r string
+	if status == nil {
+		return
+	}
+	if status.rStatus == Start {
+		r = "Start"
+	}
+	if status.rStatus == Preflight {
+		r = "Preflight"
+	}
+	if status.rStatus == PreflightFailed {
+		r = "PreflightFailed"
+	}
+	if status.rStatus == InFlight {
+		r = "InFlight"
+	}
+	if status.rStatus == InFlightFailed {
+		r = "InFlightFailed"
+	}
+	if status.rStatus == PostFlight {
+		r = "PostFlight"
+	}
+	if status.rStatus == PostFlightFailed {
+		r = "PostFlightFailed"
+	}
+	if status.rStatus == FlightEnd {
+		r = "FlightEnd"
+	}
+	if status.rStatus == Failed {
+		r = "Failed"
+	}
+	if status.rStatus == Succeed {
+		r = "Succeed"
+	}
+
+	fmt.Printf("nodeId:%s, status:%s\n", status.nodeId, r)
+
 }

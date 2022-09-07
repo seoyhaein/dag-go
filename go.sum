@@ -478,6 +478,8 @@ github.com/digitalocean/go-qemu v0.0.0-20210326154740-ac9e0b687001/go.mod h1:Iet
 github.com/dimchansky/utfbom v1.1.1/go.mod h1:SxdoEBH5qIqFocHMyGOXVAybYJdr71b1Q/j0mACtrfE=
 github.com/disiqueira/gotree/v3 v3.0.2 h1:ik5iuLQQoufZBNPY518dXhiO5056hyNBIK9lWhkNRq8=
 github.com/disiqueira/gotree/v3 v3.0.2/go.mod h1:ZuyjE4+mUQZlbpkI24AmruZKhg3VHEgPLDY8Qk+uUu8=
+github.com/dlsniper/debugger v0.6.0 h1:AyPoOtJviCmig9AKNRAPPw5B5UyB+cI72zY3Jb+6LlA=
+github.com/dlsniper/debugger v0.6.0/go.mod h1:FFdRcPU2Yo4P411bp5U97DHJUSUMKcqw1QMGUu0uVb8=
 github.com/dnaeon/go-vcr v1.0.1/go.mod h1:aBB1+wY4s93YsC3HHjMBMrwTj2R9FHDzUr9KyGc8n1E=
 github.com/docker/cli v0.0.0-20191017083524-a8ff7f821017/go.mod h1:JLrzqnKDaYBop7H2jaqPtU4hHvMKP+vjCwu2uszcLI8=
 github.com/docker/cli v20.10.16+incompatible/go.mod h1:JLrzqnKDaYBop7H2jaqPtU4hHvMKP+vjCwu2uszcLI8=

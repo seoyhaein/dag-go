@@ -335,6 +335,9 @@ github.com/davecgh/go-spew/spew
 # github.com/disiqueira/gotree/v3 v3.0.2
 ## explicit; go 1.13
 github.com/disiqueira/gotree/v3
+# github.com/dlsniper/debugger v0.6.0
+## explicit; go 1.13
+github.com/dlsniper/debugger
 # github.com/docker/distribution v2.8.1+incompatible
 ## explicit
 github.com/docker/distribution
