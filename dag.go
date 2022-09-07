@@ -634,7 +634,7 @@ func (dag *Dag) DisableTimeout() {
 	}
 }
 
-// AddCommand add command to node. TODO node 의 field 가 늘어날때 수정해준다.
+// AddCommand add command to node.
 func (dag *Dag) AddCommand(id, cmd string) (node *Node) {
 	node = nil
 	if n, b := nodeExist(dag, id); b == true {
@@ -680,7 +680,7 @@ func (dag *Dag) AddNodeToStartNode(to *Node) error {
 	return nil
 }
 
-// copyDag 내일 테스트 해야함. dag.nodes 에 넣 어줬다. 이제 각각의 노드에 넣는 부분을 완성해야 한다.
+// copyDag dag 를 복사함.
 func copyDag(original *Dag) (map[string]*Node, []*Edge) {
 	num := len(original.nodes)
 	if num < 1 {
@@ -739,7 +739,6 @@ func copyDag(original *Dag) (map[string]*Node, []*Edge) {
 			nodes[n.Id].to = append(nodes[n.Id].to, id)
 		}
 	}
-
 	return nodes, edges
 }
 
