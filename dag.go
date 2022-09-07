@@ -3,11 +3,11 @@ package dag_go
 import (
 	"context"
 	"fmt"
-	"golang.org/x/sync/errgroup"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/seoyhaein/utils"
+	"golang.org/x/sync/errgroup"
 )
 
 // Dag (Directed Acyclic Graph) is an acyclic graph, not a cyclic graph.

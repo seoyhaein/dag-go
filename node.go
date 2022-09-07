@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"github.com/dlsniper/debugger"
+	// (do not erase) goroutine 디버깅용
+	//"github.com/dlsniper/debugger"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -44,15 +44,11 @@ func setFunc(n *Node) {
 	n.runner = func(ctx context.Context, n *Node, result chan *printStatus) {
 		//(do not erase) defer close(result)
 		r := preFlight(ctx, n)
-
 		result <- r
-		//TODO 특정 노드가 실패하면 여기서 빠져 나가야 할 것 같다.
 		r = inFlight(n)
 		result <- r
-		//TODO 특정 노드가 실패하면 여기서 빠져 나가야 할 것 같다.
 		r = postFlight(n)
 		result <- r
-		//TODO 특정 노드가 실패하면 여기서 빠져 나가야 할 것 같다.
 	}
 }
 
@@ -61,13 +57,15 @@ func setFunc(n *Node) {
 func preFlight(ctx context.Context, n *Node) *printStatus {
 	if n == nil {
 		panic(fmt.Errorf("node is nil"))
+		// (do not erase) 안정화 버전 나올때는 panic 을 리턴으로 처리
 		//return &printStatus{PreflightFailed, noNodeId}
 	}
-	debugger.SetLabels(func() []string {
+	// (do not erase) goroutine 디버깅용
+	/*debugger.SetLabels(func() []string {
 		return []string{
 			"preFlight: nodeId", n.Id,
 		}
-	})
+	})*/
 
 	// 성공하면 context 사용한다.
 	eg, _ := errgroup.WithContext(ctx)
@@ -77,7 +75,6 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 		k := j
 		c := n.parentVertex[k]
 		eg.Go(func() error {
-			// TODO 여기서 처리하자.
 			result := <-c
 			if result == Failed {
 				return fmt.Errorf("failed")
@@ -96,6 +93,7 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 func preFlightT(ctx context.Context, n *Node) *printStatus {
 	if n == nil {
 		panic(fmt.Errorf("node is nil"))
+		// (do not erase) 안정화 버전 나올때는 panic 을 리턴으로 처리
 		//return &printStatus{PreflightFailed, noNodeId}
 	}
 	// 성공하면 context 사용한다.
@@ -107,14 +105,12 @@ func preFlightT(ctx context.Context, n *Node) *printStatus {
 		k := j
 		c := n.parentVertex[k]
 		try = eg.TryGo(func() error {
-			// TODO 여기서 처리하자.
 			result := <-c
 			if result == Failed {
 				return fmt.Errorf("failed")
 			}
 			return nil
 		})
-
 		if !try {
 			break
 		}
@@ -156,35 +152,24 @@ func preFlightT(ctx context.Context, n *Node) *printStatus {
 func inFlight(n *Node) *printStatus {
 	if n == nil {
 		panic(fmt.Errorf("node is nil"))
+		// (do not erase) 안정화 버전 나올때는 panic 을 리턴으로 처리
 		//return &printStatus{InFlightFailed, noNodeId}
 	}
-
-	debugger.SetLabels(func() []string {
+	// (do not erase) goroutine 디버깅용
+	/*debugger.SetLabels(func() []string {
 		return []string{
 			"inFlight: nodeId", n.Id,
 		}
-	})
+	})*/
 
-	/*if n.Id == StartNode {
-		Log.Println("start dag-go ", n.Id)
-	}*/
-
-	/*if n.Id == EndNode {
-		//Log.Println("end all tasks", n.Id)
-	}*/
-	//var bResult = false
 	if n.Id == StartNode || n.Id == EndNode {
-		//bResult = true
 		n.succeed = true
 	} else {
 		// 성골할때만 명령을 실행시키고, 실패할경우는 채널에 값만 흘려 보낸다.
 		// TODO 리턴 코드 작성하자.
 		if n.succeed {
 			_, err := n.Execute()
-			//Log.Println(n.Id, r)
 			if err != nil {
-				//Log.Println("실패")
-				//bResult = false
 				n.succeed = false
 			} else {
 				n.succeed = true
@@ -205,11 +190,12 @@ func postFlight(n *Node) *printStatus {
 		panic(fmt.Errorf("node is nil"))
 		//return &printStatus{PostFlightFailed, noNodeId}
 	}
-	debugger.SetLabels(func() []string {
+	// (do not erase) goroutine 디버깅용
+	/*debugger.SetLabels(func() []string {
 		return []string{
 			"postFlight: nodeId", n.Id,
 		}
-	})
+	})*/
 	if n.Id == EndNode {
 		return &printStatus{FlightEnd, n.Id}
 	}
@@ -276,8 +262,7 @@ func getNextNode(n *Node) *Node {
 // 만약 circle 이면 무한루프 돔. (1,3), (3,1)
 // visited 를 분리 해야 할까??
 // cycle 이면 true, cycle 이 아니면 false
-// TODO 여기서 deepcopy 하는데 이거 정리하자. dag_test.go 에서 에러나는 거 찾아서 해결하자.
-// cloneGraph
+// deprecated cloneGraph
 func cloneGraph(ns map[string]*Node) (map[string]*Node, bool) {
 
 	if ns == nil {
