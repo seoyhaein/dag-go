@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
 	// (do not erase) goroutine 디버깅용
 	//"github.com/dlsniper/debugger"
 	"golang.org/x/sync/errgroup"
@@ -126,7 +127,7 @@ func preFlightT(ctx context.Context, n *Node) *printStatus {
 	return &printStatus{PreflightFailed, noNodeId}
 }
 
-// (do not erase)
+// (do not erase) 참고 자료용
 /*func preFlight(n *Node) *printStatus {
 
 	if n == nil {
