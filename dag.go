@@ -743,7 +743,7 @@ func copyDag(original *Dag) (map[string]*Node, []*Edge) {
 	return nodes, edges
 }
 
-// CopyDag TODO 테스트 하자.
+// CopyDag dag 를 복사함.
 func CopyDag(original *Dag, Id string) (copied *Dag) {
 	if original == nil {
 		return nil
