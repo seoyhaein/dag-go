@@ -33,11 +33,12 @@ func (pipe *Pipeline) Start(ctx context.Context) {
 		return
 	}
 
-	for _, d := range pipe.Dags {
+	for i, d := range pipe.Dags {
 		d.DagSetFunc()
 		d.GetReady(ctx)
 		d.Start()
 		d.Wait(ctx)
+		fmt.Println("count:", i)
 	}
 }
 
@@ -57,17 +58,8 @@ func (pipe *Pipeline) ReStart(ctx context.Context, dag *Dag) {
 // 전자가 쉽게 생각할 수 있지만 메모리 낭비 가있다. 일단 전자로 개발한다. 후자는 아직 아이디어가 없다.
 // TODO 데이터와 관련해서 추가 해서 수정해줘야 한다. 추후 안정화 되면 panic 은 error 로 교체한다.
 func (pipe *Pipeline) NewDags(ds int, original *Dag) *Pipeline {
-	/*n := 1
-	pid := pipe.Id
-	dags := len(pipe.Dags)
-
-	if dags > 0 {
-		n = dags + 1
-	}
-	sn := strconv.Itoa(n)*/
-	//dag := NewDagWithPId(pid, sn)
-
 	var dag *Dag
+
 	if utils.IsEmptyString(pipe.Id) {
 		panic("pipeline id is empty")
 	}
@@ -78,15 +70,14 @@ func (pipe *Pipeline) NewDags(ds int, original *Dag) *Pipeline {
 
 	for i := 1; i <= ds; i++ {
 		dagId := fmt.Sprintf("%s-%d", pipe.Id, i)
-		dag = NewDagWithPId(dagId, pipe.ContainerCmd)
+		dag = CopyDag(original, dagId)
 
 		if dag == nil {
-			panic("NewDagWithPId failed")
+			panic("CopyDag failed")
 		}
 
 		pipe.Dags = append(pipe.Dags, dag)
 	}
-
 	return pipe
 }
 

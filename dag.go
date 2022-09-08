@@ -3,6 +3,7 @@ package dag_go
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,6 +33,8 @@ type Dag struct {
 	bTimeout bool
 
 	ContainerCmd Runnable
+
+	//mutex *sync.Mutex
 }
 
 // Edge is a channel. It has the same meaning as the connecting line connecting the parent and child nodes.
@@ -67,6 +70,8 @@ func NewDag() *Dag {
 	// TODO check
 	dag.RunningStatus = make(chan *printStatus, Max)
 
+	// add by seoy
+	//dag.mutex = new(sync.Mutex)
 	return dag
 }
 
@@ -482,6 +487,53 @@ func (dag *Dag) DagSetFunc() bool {
 	return true
 }
 
+func (dag *Dag) ConnectRunner() bool {
+	n := len(dag.nodes)
+	if n < 1 {
+		return false
+	}
+	for _, v := range dag.nodes {
+		connectRunner(v)
+	}
+	return true
+}
+
+// Debug 목적으로 스택? 두개 만들어서 채널에서 보내는 값과, 받는  값각각 넣어서 비교해본다.
+// (do not erase) close 해주는 것 : func (dag *Dag) Wait(ctx context.Context) bool  에서 defer close(dag.RunningStatus) 해줌
+// (do not erase) 너무 중요.@@@@ 채널 close 방식 확인하자. https://go101.org/article/channel-closing.html 너무 좋은 자료. 왜 제목을 101 이라고 했지 중급이상인데.
+// setFunc commit by seoy
+// https://stackoverflow.com/questions/15715605/multiple-goroutines-listening-on-one-channel
+// https://go.dev/ref/mem#tmp_7 읽자.
+
+func setFunc(n *Node) {
+	n.runner = func(ctx context.Context, n *Node, result chan<- *printStatus) {
+		//(do not erase) defer close(result)
+		mutex := new(sync.Mutex)
+		mutex.Lock()
+		r := preFlight(ctx, n)
+		result <- r
+		r = inFlight(n)
+		result <- r
+		r = postFlight(n)
+		result <- r
+		mutex.Unlock()
+		close(result)
+	}
+}
+
+func connectRunner(n *Node) {
+	n.runner = func(ctx context.Context, n *Node, result chan<- *printStatus) {
+		//(do not erase) defer close(result)
+
+		r := preFlight(ctx, n)
+		result <- r
+		r = inFlight(n)
+		result <- r
+		r = postFlight(n)
+		result <- r
+	}
+}
+
 // BeforeGetReady 이건 컨테이너 전용- 이미지 생성할때 고루틴 돌리니 에러 발생..
 // TODO check ContainerCmd
 func (dag *Dag) BeforeGetReady(ctx context.Context, healthChecker string) {
@@ -521,6 +573,7 @@ func (dag *Dag) BeforeGetReadyT(ctx context.Context, healthChecker string) {
 	}
 }
 
+// GetReady error dag.RunningStatus race 문제 발생.
 func (dag *Dag) GetReady(ctx context.Context) bool {
 	n := len(dag.nodes)
 	if n < 1 {
