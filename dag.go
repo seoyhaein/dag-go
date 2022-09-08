@@ -504,6 +504,7 @@ func (dag *Dag) ConnectRunner() bool {
 // setFunc commit by seoy
 // https://stackoverflow.com/questions/15715605/multiple-goroutines-listening-on-one-channel
 // https://go.dev/ref/mem#tmp_7 읽자.
+// https://umi0410.github.io/blog/golang/go-mutex-semaphore/
 
 func setFunc(n *Node) {
 	n.runner = func(ctx context.Context, n *Node, result chan<- *printStatus) {
