@@ -25,7 +25,7 @@
 #+ 포어그라운드 상태로 동작하는 프로세스
 
 i=1
-while read line || [ -n "$line" ] ; do
+while read -r line || [ -n "$line" ] ; do
   if [[ "$line" == *pid* ]]; then
     pid=${line#pid:}
     echo "$pid"
