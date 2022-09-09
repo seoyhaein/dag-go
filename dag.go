@@ -3,7 +3,6 @@ package dag_go
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,6 +23,7 @@ type Dag struct {
 	validated bool
 
 	RunningStatus chan *printStatus
+	runningStatus []chan *printStatus
 
 	// 에러를 모으는 용도.
 	errLogs []*systemError
@@ -33,8 +33,6 @@ type Dag struct {
 	bTimeout bool
 
 	ContainerCmd Runnable
-
-	//mutex *sync.Mutex
 }
 
 // Edge is a channel. It has the same meaning as the connecting line connecting the parent and child nodes.
@@ -42,10 +40,6 @@ type Edge struct {
 	parentId string
 	childId  string
 	vertex   chan runningStatus
-}
-
-// TODO 함 수호출 순서 정하자. 추후 생각하자.
-type callOrder struct {
 }
 
 // NewDag creates a pointer to the Dag structure.
@@ -70,8 +64,6 @@ func NewDag() *Dag {
 	// TODO check
 	dag.RunningStatus = make(chan *printStatus, Max)
 
-	// add by seoy
-	//dag.mutex = new(sync.Mutex)
 	return dag
 }
 
@@ -476,7 +468,7 @@ func (dag *Dag) detectCycle(startNodeId string, endNodeId string, visit map[stri
 	return cycle, end
 }
 
-func (dag *Dag) DagSetFunc() bool {
+/*func (dag *Dag) DagSetFunc() bool {
 	n := len(dag.nodes)
 	if n < 1 {
 		return false
@@ -485,7 +477,7 @@ func (dag *Dag) DagSetFunc() bool {
 		setFunc(v)
 	}
 	return true
-}
+}*/
 
 func (dag *Dag) ConnectRunner() bool {
 	n := len(dag.nodes)
@@ -506,7 +498,7 @@ func (dag *Dag) ConnectRunner() bool {
 // https://go.dev/ref/mem#tmp_7 읽자.
 // https://umi0410.github.io/blog/golang/go-mutex-semaphore/
 
-func setFunc(n *Node) {
+/*func setFunc(n *Node) {
 	n.runner = func(ctx context.Context, n *Node, result chan<- *printStatus) {
 		//(do not erase) defer close(result)
 		mutex := new(sync.Mutex)
@@ -520,12 +512,11 @@ func setFunc(n *Node) {
 		mutex.Unlock()
 		close(result)
 	}
-}
+}*/
 
 func connectRunner(n *Node) {
 	n.runner = func(ctx context.Context, n *Node, result chan<- *printStatus) {
-		//(do not erase) defer close(result)
-
+		defer close(result)
 		r := preFlight(ctx, n)
 		result <- r
 		r = inFlight(n)
@@ -586,6 +577,24 @@ func (dag *Dag) GetReady(ctx context.Context) bool {
 	return true
 }
 
+func (dag *Dag) GetReadyT(ctx context.Context) bool {
+	n := len(dag.nodes)
+	if n < 1 {
+		return false
+	}
+	var chs []chan *printStatus
+	for _, v := range dag.nodes {
+		ch := make(chan *printStatus, Min)
+		chs = append(chs, ch)
+		go v.runner(ctx, v, ch)
+	}
+	if dag.runningStatus != nil {
+		return false
+	}
+	dag.runningStatus = chs
+	return true
+}
+
 // Start start_node has one vertex. That is, it has only one channel and this channel is not included in the edge.
 // It is started by sending a value to this channel when starting the dag's operation.
 func (dag *Dag) Start() bool {
@@ -609,13 +618,13 @@ func (dag *Dag) Start() bool {
 // Closing a channel on a receiver violates the general channel close principle.
 // However, when Wait terminates, it seems safe to close the channel here because all tasks are finished.
 func (dag *Dag) Wait(ctx context.Context) bool {
-	defer close(dag.RunningStatus)
-
+	//defer close(dag.RunningStatus)
+	dag.wait()
 	for {
 		if dag.bTimeout {
 			select {
 			case c := <-dag.RunningStatus:
-				//printRunningStatus(c)
+				printRunningStatus(c)
 				if c.nodeId == EndNode {
 					if c.rStatus == PreflightFailed {
 						return false
@@ -658,6 +667,34 @@ func (dag *Dag) Wait(ctx context.Context) bool {
 			}
 		}
 	}
+}
+
+// WaitT return 이 있는 것에 대한 의문..
+func (dag *Dag) wait() {
+	defer close(dag.RunningStatus)
+
+	var ss []chan *printStatus
+	ss = dag.runningStatus
+	for {
+		n := len(ss)
+		if n < 1 {
+			break
+		}
+		for i := 0; i > n; i++ {
+			c := ss[i]
+			select {
+			case status := <-c:
+				ss = remove(ss, i)
+				dag.RunningStatus <- status
+			}
+		}
+	}
+}
+
+// TODO 따로 빼놓자.
+// https://stackoverflow.com/questions/37334119/how-to-delete-an-element-from-a-slice-in-golang
+func remove(ss []chan *printStatus, i int) []chan *printStatus {
+	return append(ss[:i], ss[i+1:]...)
 }
 
 // 테스트 용으로 만듬.
