@@ -77,7 +77,7 @@ func (c *Container) CreateImage(a interface{}, healthChecker string) error {
 
 		nodeImage := pbr.CreateCustomImage(n.Id, c.BaseImage, filename, n.Commands)
 		if nodeImage == nil {
-			fmt.Errorf("cannot create node image")
+			return fmt.Errorf("cannot create node image")
 		}
 		n.ImageName = *nodeImage
 		return nil
