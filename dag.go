@@ -288,7 +288,7 @@ func (dag *Dag) AddEdge(from, to string) error {
 	edge, check := dag.createEdge(fromNode.Id, toNode.Id)
 
 	if check == Fault || check == Exist {
-		err := fmt.Errorf("Edge cannot be created")
+		err := fmt.Errorf("edge cannot be created")
 		dag.errLogs = append(dag.errLogs, &systemError{AddEdge, err})
 		return err
 	}
@@ -318,7 +318,7 @@ func (dag *Dag) addEndNode(fromNode, toNode *Node) error {
 
 	edge, check := dag.createEdge(fromNode.Id, toNode.Id)
 	if check == Fault || check == Exist {
-		return fmt.Errorf("Edge cannot be created")
+		return fmt.Errorf("edge cannot be created")
 	}
 	//v := dag.getVertex(fromNode.Id, toNode.Id)
 
@@ -326,7 +326,7 @@ func (dag *Dag) addEndNode(fromNode, toNode *Node) error {
 		fromNode.childrenVertex = append(fromNode.childrenVertex, edge.vertex)
 		toNode.parentVertex = append(toNode.parentVertex, edge.vertex)
 	} else {
-		fmt.Errorf("vertex is nil")
+		return fmt.Errorf("vertex is nil")
 	}
 	return nil
 }
