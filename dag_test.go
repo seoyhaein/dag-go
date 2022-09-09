@@ -33,8 +33,8 @@ func TestSimpleDag(t *testing.T) {
 		t.Errorf("%+v", err)
 	}
 	ctx := context.Background()
-	dag.DagSetFunc()
-	dag.GetReady(ctx)
+	dag.ConnectRunner()
+	dag.GetReadyT(ctx)
 	b1 := dag.Start()
 	assert.Equal(true, b1, "true")
 

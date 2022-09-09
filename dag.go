@@ -514,6 +514,7 @@ func (dag *Dag) ConnectRunner() bool {
 	}
 }*/
 
+// TODO 정상 작동하면 channel 설정하자.
 func connectRunner(n *Node) {
 	n.runner = func(ctx context.Context, n *Node, result chan<- *printStatus) {
 		defer close(result)
