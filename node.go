@@ -24,7 +24,7 @@ type Node struct {
 	//status         string
 	childrenVertex []chan runningStatus
 	parentVertex   []chan runningStatus
-	runner         func(ctx context.Context, n *Node, result chan<- *printStatus)
+	runner         func(ctx context.Context, n *Node, result chan *printStatus)
 
 	// add by seoy race 문제 해결을 위해 22/09/08
 	//nodeStatus chan *printStatus

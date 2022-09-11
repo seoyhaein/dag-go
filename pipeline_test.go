@@ -28,7 +28,8 @@ func TestNewPipeline(t *testing.T) {
 	//TODO 일단 구현에서 빠진 부분을 일단 보완하고 추가적으로 진행한다.
 	copy := CopyDag(d, "78")
 	ctx := context.Background()
-	copy.DagSetFunc()
+	copy.ConnectRunner()
+	//copy.DagSetFunc()
 	copy.GetReady(ctx)
 	copy.Start()
 	//time.Sleep(time.Second * 10)
@@ -42,6 +43,7 @@ func TestNewPipeline(t *testing.T) {
 	d.Wait(ctx)*/
 }
 
+// 오류있어서 일단 테스트 해봐야 함.
 func TestNewPipeline01(t *testing.T) {
 	d := NewDag()
 	d.AddEdge(d.StartNode.Id, "1")

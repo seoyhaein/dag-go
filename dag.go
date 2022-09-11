@@ -468,17 +468,6 @@ func (dag *Dag) detectCycle(startNodeId string, endNodeId string, visit map[stri
 	return cycle, end
 }
 
-/*func (dag *Dag) DagSetFunc() bool {
-	n := len(dag.nodes)
-	if n < 1 {
-		return false
-	}
-	for _, v := range dag.nodes {
-		setFunc(v)
-	}
-	return true
-}*/
-
 func (dag *Dag) ConnectRunner() bool {
 	n := len(dag.nodes)
 	if n < 1 {
@@ -497,35 +486,6 @@ func (dag *Dag) ConnectRunner() bool {
 // https://stackoverflow.com/questions/15715605/multiple-goroutines-listening-on-one-channel
 // https://go.dev/ref/mem#tmp_7 읽자.
 // https://umi0410.github.io/blog/golang/go-mutex-semaphore/
-
-/*func setFunc(n *Node) {
-	n.runner = func(ctx context.Context, n *Node, result chan<- *printStatus) {
-		//(do not erase) defer close(result)
-		mutex := new(sync.Mutex)
-		mutex.Lock()
-		r := preFlight(ctx, n)
-		result <- r
-		r = inFlight(n)
-		result <- r
-		r = postFlight(n)
-		result <- r
-		mutex.Unlock()
-		close(result)
-	}
-}*/
-
-// TODO 정상 작동하면 channel 설정하자.
-func connectRunner(n *Node) {
-	n.runner = func(ctx context.Context, n *Node, result chan<- *printStatus) {
-		defer close(result)
-		r := preFlight(ctx, n)
-		result <- r
-		r = inFlight(n)
-		result <- r
-		r = postFlight(n)
-		result <- r
-	}
-}
 
 // BeforeGetReady 이건 컨테이너 전용- 이미지 생성할때 고루틴 돌리니 에러 발생..
 // TODO check ContainerCmd
@@ -566,26 +526,29 @@ func (dag *Dag) BeforeGetReadyT(ctx context.Context, healthChecker string) {
 	}
 }
 
-// GetReady error dag.RunningStatus race 문제 발생.
-func (dag *Dag) GetReady(ctx context.Context) bool {
-	n := len(dag.nodes)
-	if n < 1 {
-		return false
+// TODO 정상 작동하면 channel 설정하자.
+// https://jacking75.github.io/go_channel_howto/
+func connectRunner(n *Node) {
+	n.runner = func(ctx context.Context, n *Node, result chan *printStatus) {
+		defer close(result)
+		r := preFlight(ctx, n)
+		result <- r
+		r = inFlight(n)
+		result <- r
+		r = postFlight(n)
+		result <- r
 	}
-	for _, v := range dag.nodes {
-		go v.runner(ctx, v, dag.RunningStatus)
-	}
-	return true
 }
 
-func (dag *Dag) GetReadyT(ctx context.Context) bool {
+func (dag *Dag) GetReady(ctx context.Context) bool {
 	n := len(dag.nodes)
 	if n < 1 {
 		return false
 	}
 	var chs []chan *printStatus
 	for _, v := range dag.nodes {
-		ch := make(chan *printStatus, Min)
+		ch := make(chan *printStatus, 10)
+		//dag.runningStatus = append(dag.runningStatus, ch)
 		chs = append(chs, ch)
 		go v.runner(ctx, v, ch)
 	}
@@ -670,32 +633,41 @@ func (dag *Dag) Wait(ctx context.Context) bool {
 	}
 }
 
-// WaitT return 이 있는 것에 대한 의문..
+// wait 오류 수정. 확인 필요.
 func (dag *Dag) wait() {
 	defer close(dag.RunningStatus)
 
-	var ss []chan *printStatus
-	ss = dag.runningStatus
-	for {
-		n := len(ss)
-		if n < 1 {
-			break
-		}
-		for i := 0; i > n; i++ {
-			c := ss[i]
-			select {
-			case status := <-c:
-				ss = remove(ss, i)
-				dag.RunningStatus <- status
-			}
+	n := len(dag.runningStatus)
+	if n < 1 {
+		return
+	}
+	for i := 0; i < n; i++ {
+		ch := dag.runningStatus[i]
+		for v := range ch {
+			dag.RunningStatus <- v
 		}
 	}
-}
 
-// TODO 따로 빼놓자.
-// https://stackoverflow.com/questions/37334119/how-to-delete-an-element-from-a-slice-in-golang
-func remove(ss []chan *printStatus, i int) []chan *printStatus {
-	return append(ss[:i], ss[i+1:]...)
+	/*	var ss []chan *printStatus
+		rs := len(dag.runningStatus)
+		if rs < 1 {
+			return
+		}
+		ss = dag.runningStatus
+		for {
+			n := len(ss)
+			if n < 1 {
+				break
+			}
+			for i := 0; i < n; i++ {
+				c := dag.runningStatus[i]
+				select {
+				case status := <-c:
+					ss = remove(ss, i)
+					dag.RunningStatus <- status
+				}
+			}
+		}*/
 }
 
 // 테스트 용으로 만듬.

@@ -26,19 +26,19 @@ func TestSimpleDag(t *testing.T) {
 	dag.AddEdge("2", "5")
 	dag.AddEdge("5", "6")
 	// TODO 수정해야함.
-	dag.AddCommand("1", "")
+	//dag.AddCommand("1", "")
 
 	err := dag.FinishDag()
 	if err != nil {
 		t.Errorf("%+v", err)
 	}
 	ctx := context.Background()
+
 	dag.ConnectRunner()
-	dag.GetReadyT(ctx)
+	dag.GetReady(ctx)
 	b1 := dag.Start()
 	assert.Equal(true, b1, "true")
 
-	// 에러 발생하게 했다.
 	b2 := dag.Wait(ctx)
 	assert.Equal(true, b2, "true")
 

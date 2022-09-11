@@ -34,7 +34,8 @@ func (pipe *Pipeline) Start(ctx context.Context) {
 	}
 
 	for i, d := range pipe.Dags {
-		d.DagSetFunc()
+		d.ConnectRunner()
+		//d.DagSetFunc()
 		d.GetReady(ctx)
 		d.Start()
 		d.Wait(ctx)
