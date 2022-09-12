@@ -67,111 +67,12 @@ func NewDag() *Dag {
 	return dag
 }
 
-func NewDagWithPIdT(pid string, n string, r Runnable) *Dag {
-	dag := new(Dag)
-	dag.nodes = make(map[string]*Node)
-	dag.Id = fmt.Sprintf("%s-%s", pid, n)
-	dag.validated = false
-
-	dag.StartNode = dag.createNode(StartNode)
-
-	// 시작할때 넣어주는 채널 여기서 세팅된다.
-	// error message : 중복된 node id 로 노드를 생성하려고 했습니다, createNode
-	if dag.StartNode == nil {
-		return nil
-	}
-	// 시작노드는 반드시 하나의 채널을 넣어 줘야 한다.
-	// start 함수에서 채널 값을 넣어준다.
-	dag.StartNode.parentVertex = append(dag.StartNode.parentVertex, make(chan runningStatus, Min))
-
-	// TODO check
-	dag.RunningStatus = make(chan *printStatus, Max)
-
-	return dag
-}
-
-func NewDagWithPId(dagId string, r Runnable) *Dag {
-	dag := new(Dag)
-	dag.nodes = make(map[string]*Node)
-	dag.Id = dagId
-	//dag.Id = fmt.Sprintf("%s-%s", pid, n)
-	dag.validated = false
-
-	dag.StartNode = dag.createNode(StartNode)
-
-	// 시작할때 넣어주는 채널 여기서 세팅된다.
-	// error message : 중복된 node id 로 노드를 생성하려고 했습니다, createNode
-	if dag.StartNode == nil {
-		return nil
-	}
-	// 시작노드는 반드시 하나의 채널을 넣어 줘야 한다.
-	// start 함수에서 채널 값을 넣어준다.
-	dag.StartNode.parentVertex = append(dag.StartNode.parentVertex, make(chan runningStatus, Min))
-
-	// TODO check
-	dag.RunningStatus = make(chan *printStatus, Max)
-
-	return dag
-}
-
 func (dag *Dag) SetContainerCmd(r Runnable) {
 	dag.ContainerCmd = r
 }
 
 // createEdge creates an Edge. Edge has the ID of the child node and the ID of the child node.
 // Therefore, the Edge is created with the ID of the parent node and the ID of the child node the same.
-func (dag *Dag) createEdgeT(parentId, childId string) (*Edge, createEdgeErrorType) {
-	if utils.IsEmptyString(parentId) || utils.IsEmptyString(childId) {
-		return nil, Fault
-	}
-	// 총 4가지를 생각해야 할 거 같다.
-	for _, v := range dag.Edges {
-		if v.parentId == parentId {
-			if v.childId == childId { // parentId 는 같고, childId 같을 경우
-				return nil, Exist
-			} else { // parentId 는 같고, childId 가 다를 경우
-				cm := new(Edge)
-				cm.parentId = v.parentId
-				cm.childId = childId
-				cm.vertex = make(chan runningStatus, Min)
-
-				dag.Edges = append(dag.Edges, cm)
-
-				return cm, Create
-			}
-		} else { // parentId 가 다를 경우
-			if v.childId == childId { // childId 같을 경우
-				cm := new(Edge)
-				cm.parentId = parentId
-				cm.childId = v.childId
-				cm.vertex = make(chan runningStatus, Min)
-
-				dag.Edges = append(dag.Edges, cm)
-
-				return cm, Create
-			} else { // parentId 가 다르고 childId 도 다를 경우
-				cm := new(Edge)
-				cm.parentId = parentId
-				cm.childId = childId
-				cm.vertex = make(chan runningStatus, Min)
-
-				dag.Edges = append(dag.Edges, cm)
-
-				return cm, Create
-			}
-		}
-	}
-	// range 구문이 안돌 경우, 데이터가 없을때.
-	cm := new(Edge)
-	cm.parentId = parentId
-	cm.childId = childId
-	cm.vertex = make(chan runningStatus, Min)
-
-	dag.Edges = append(dag.Edges, cm)
-
-	return cm, Create
-}
-
 func (dag *Dag) createEdge(parentId, childId string) (*Edge, createEdgeErrorType) {
 	if utils.IsEmptyString(parentId) || utils.IsEmptyString(childId) {
 		return nil, Fault
@@ -512,7 +413,7 @@ func (dag *Dag) BeforeGetReady(ctx context.Context, healthChecker string) {
 	}
 }
 
-func (dag *Dag) BeforeGetReadyT(ctx context.Context, healthChecker string) {
+func (dag *Dag) BeforeGetReadyT( /*ctx context.Context, */ healthChecker string) {
 
 	if dag.ContainerCmd == nil {
 		panic("ContainerCmd is not set")
@@ -540,7 +441,8 @@ func connectRunner(n *Node) {
 	}
 }
 
-func (dag *Dag) GetReady(ctx context.Context) bool {
+// GetReadyT TODO 맨 마지막에 end 넣는 것은 생각해보자. 굳이 필요 없는 것 같긴하다.
+func (dag *Dag) GetReadyT(ctx context.Context) bool {
 	n := len(dag.nodes)
 	if n < 1 {
 		return false
@@ -557,6 +459,56 @@ func (dag *Dag) GetReady(ctx context.Context) bool {
 	}
 	dag.runningStatus = chs
 	return true
+}
+
+func (dag *Dag) GetReady(ctx context.Context) bool {
+	n := len(dag.nodes)
+	if n < 1 {
+		return false
+	}
+	var chs []chan *printStatus
+	endCh := make(chan *printStatus, 3)
+	var end *Node
+	for _, v := range dag.nodes {
+		if v.Id == StartNode {
+			start := make(chan *printStatus, 3)
+			chs = insert(chs, 0, start)
+			go v.runner(ctx, v, start)
+		}
+
+		if v.Id != StartNode && v.Id != EndNode {
+			ch := make(chan *printStatus, 3)
+			chs = append(chs, ch)
+			go v.runner(ctx, v, ch)
+		}
+
+		if v.Id == EndNode {
+			end = v
+		}
+	}
+
+	if end == nil {
+		panic("EndNode is nil")
+	}
+	chs = append(chs, endCh)
+	go end.runner(ctx, end, endCh)
+
+	if dag.runningStatus != nil {
+		return false
+	}
+	dag.runningStatus = chs
+	return true
+}
+
+// https://stackoverflow.com/questions/46128016/insert-a-value-in-a-slice-at-a-given-index
+// insert 테스트 후 utils 에 넣기
+func insert(a []chan *printStatus, index int, value chan *printStatus) []chan *printStatus {
+	if len(a) == index { // nil or empty slice or after last element
+		return append(a, value)
+	}
+	a = append(a[:index+1], a[index:]...) // index < len(a)
+	a[index] = value
+	return a
 }
 
 // Start start_node has one vertex. That is, it has only one channel and this channel is not included in the edge.
@@ -583,7 +535,7 @@ func (dag *Dag) Start() bool {
 // However, when Wait terminates, it seems safe to close the channel here because all tasks are finished.
 func (dag *Dag) Wait(ctx context.Context) bool {
 	//defer close(dag.RunningStatus)
-	dag.wait()
+	dag.merge()
 	for {
 		if dag.bTimeout {
 			select {
@@ -633,8 +585,8 @@ func (dag *Dag) Wait(ctx context.Context) bool {
 	}
 }
 
-// wait 오류 수정. 확인 필요.
-func (dag *Dag) wait() {
+// merge 잠재적인 버그인데... 먼저 도착한 것이 기다리는 상황이 발생함.
+func (dag *Dag) merge() {
 	defer close(dag.RunningStatus)
 
 	n := len(dag.runningStatus)
@@ -647,27 +599,72 @@ func (dag *Dag) wait() {
 			dag.RunningStatus <- v
 		}
 	}
+}
 
-	/*	var ss []chan *printStatus
-		rs := len(dag.runningStatus)
-		if rs < 1 {
-			return
+// mergeT 테스트는 내일 하자.
+func (dag *Dag) mergeT() {
+	defer close(dag.RunningStatus)
+
+	n := len(dag.runningStatus)
+
+	var (
+		order []chan *printStatus
+		// 가장 빠른 채널을 확인할때 나오는 값을 받을 slice
+		values []*printStatus
+		added  []int
+
+		j     = 0
+		index = 0
+	)
+	for {
+		// 첫번째 값은 제일 빠른 채널을 선택하는 기준이다.
+		// 추가했으면 더 이상 추가 하면 안됨.
+		//nnn := len(added)
+		//if nnn > 0 {
+		for _, a := range added {
+			if j == a {
+				j++
+			}
 		}
-		ss = dag.runningStatus
-		for {
-			n := len(ss)
-			if n < 1 {
+		if j < n {
+			index = j
+
+			ch := dag.runningStatus[index]
+			select {
+			case c := <-ch:
+				order = append(order, ch)
+				values = append(values, c)
+				// 추가한 index 넣어줌.
+				added = append(added, index)
+				break
+			default:
 				break
 			}
-			for i := 0; i < n; i++ {
-				c := dag.runningStatus[i]
-				select {
-				case status := <-c:
-					ss = remove(ss, i)
-					dag.RunningStatus <- status
-				}
+		}
+		//}
+
+		//j++
+
+		nn := len(order)
+
+		if nn == n {
+			break
+		}
+
+		if j == n-1 {
+			j = 0
+		}
+	}
+
+	for i := 0; i > len(values); i++ {
+		dag.RunningStatus <- values[i]
+
+		for k := 0; k > len(order); k++ {
+			for c := range order[k] {
+				dag.RunningStatus <- c
 			}
-		}*/
+		}
+	}
 }
 
 // 테스트 용으로 만듬.
