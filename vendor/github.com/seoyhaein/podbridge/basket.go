@@ -42,7 +42,7 @@ func MustFirstCall() (*ListCreated, error) {
 
 func Save() error {
 	if Basket == nil {
-		fmt.Errorf("call MustFirstCall() first")
+		return fmt.Errorf("call MustFirstCall() first")
 	}
 	Basket.Save()
 	return nil
@@ -363,7 +363,7 @@ func Reset() error {
 
 	} else {
 		// 파일이 없으면
-		fmt.Errorf("no file")
+		return fmt.Errorf("no file")
 	}
 	return nil
 }
