@@ -535,7 +535,7 @@ func (dag *Dag) Start() bool {
 // However, when Wait terminates, it seems safe to close the channel here because all tasks are finished.
 func (dag *Dag) Wait(ctx context.Context) bool {
 	//defer close(dag.RunningStatus)
-	dag.merge()
+	dag.mergeT()
 	for {
 		if dag.bTimeout {
 			select {
@@ -641,10 +641,6 @@ func (dag *Dag) mergeT() {
 				break
 			}
 		}
-		//}
-
-		//j++
-
 		nn := len(order)
 
 		if nn == n {
@@ -655,15 +651,21 @@ func (dag *Dag) mergeT() {
 			j = 0
 		}
 	}
+	no := len(order)
+	nv := len(values)
 
-	for i := 0; i > len(values); i++ {
-		dag.RunningStatus <- values[i]
+	if no == nv {
+		for i := 0; i < len(values); i++ {
+			dag.RunningStatus <- values[i]
 
-		for k := 0; k > len(order); k++ {
-			for c := range order[k] {
+			for c := range order[i] {
 				dag.RunningStatus <- c
 			}
 		}
+	}
+	// TODO error check!
+	if no != nv {
+		panic("error")
 	}
 }
 
