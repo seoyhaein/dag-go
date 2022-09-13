@@ -16,10 +16,8 @@ type Pipeline struct {
 	ContainerCmd Runnable
 }
 
-// 파이프라인은 dag 와 데이터를 연계해야 하는데 데이터의 경우는 다른 xml 처리하는 것이 바람직할 것이다.
+// NewPipeline  파이프라인은 dag NewPipeline와 데이터를 연계해야 하는데 데이터의 경우는 다른 xml 처리하는 것이 바람직할 것이다.
 // 외부에서 데이터를 가지고 올 경우, ftp 나 scp 나 기타 다른 프롤토콜을 사용할 경우도 생각을 해야 한다.
-
-// TODO Runnable 삭제 가능.
 func NewPipeline() *Pipeline {
 
 	return &Pipeline{
@@ -27,7 +25,7 @@ func NewPipeline() *Pipeline {
 	}
 }
 
-// TODO 모든 dag 들을 실행 시킬 수 있어야 한다. 수정해줘야 한다
+// Start TODO 모든 dag 들을 실행 시킬 수 있어야 한다. 수정해줘야 한다
 func (pipe *Pipeline) Start(ctx context.Context) {
 	if pipe.Dags == nil {
 		return
@@ -43,10 +41,12 @@ func (pipe *Pipeline) Start(ctx context.Context) {
 	}
 }
 
+// Stop 개발 중
 func (pipe *Pipeline) Stop(ctx context.Context, dag *Dag) {
 	time.After(time.Second * 2)
 }
 
+// ReStart 개발 중
 func (pipe *Pipeline) ReStart(ctx context.Context, dag *Dag) {
 
 }
