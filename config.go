@@ -57,6 +57,7 @@ const noNodeId = "-1"
 
 // channel buffer size
 const (
-	Max int = 100
-	Min int = 1
+	Max           int = 100
+	Min           int = 1
+	StatusDefault int = 3
 )

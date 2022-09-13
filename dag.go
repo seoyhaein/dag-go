@@ -390,7 +390,7 @@ func (dag *Dag) ConnectRunner() bool {
 
 // BeforeGetReady 이건 컨테이너 전용- 이미지 생성할때 고루틴 돌리니 에러 발생..
 // TODO check ContainerCmd
-func (dag *Dag) BeforeGetReady(ctx context.Context, healthChecker string) {
+func (dag *Dag) CreateImageT(ctx context.Context, healthChecker string) {
 
 	if dag.ContainerCmd == nil {
 		panic("ContainerCmd is not set")
@@ -413,7 +413,7 @@ func (dag *Dag) BeforeGetReady(ctx context.Context, healthChecker string) {
 	}
 }
 
-func (dag *Dag) BeforeGetReadyT( /*ctx context.Context, */ healthChecker string) {
+func (dag *Dag) CreateImage( /*ctx context.Context, */ healthChecker string) {
 
 	if dag.ContainerCmd == nil {
 		panic("ContainerCmd is not set")
@@ -449,7 +449,7 @@ func (dag *Dag) GetReadyT(ctx context.Context) bool {
 	}
 	var chs []chan *printStatus
 	for _, v := range dag.nodes {
-		ch := make(chan *printStatus, 10)
+		ch := make(chan *printStatus, StatusDefault)
 		//dag.runningStatus = append(dag.runningStatus, ch)
 		chs = append(chs, ch)
 		go v.runner(ctx, v, ch)
@@ -467,17 +467,17 @@ func (dag *Dag) GetReady(ctx context.Context) bool {
 		return false
 	}
 	var chs []chan *printStatus
-	endCh := make(chan *printStatus, 3)
+	endCh := make(chan *printStatus, StatusDefault)
 	var end *Node
 	for _, v := range dag.nodes {
 		if v.Id == StartNode {
-			start := make(chan *printStatus, 3)
+			start := make(chan *printStatus, StatusDefault)
 			chs = insert(chs, 0, start)
 			go v.runner(ctx, v, start)
 		}
 
 		if v.Id != StartNode && v.Id != EndNode {
-			ch := make(chan *printStatus, 3)
+			ch := make(chan *printStatus, StatusDefault)
 			chs = append(chs, ch)
 			go v.runner(ctx, v, ch)
 		}

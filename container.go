@@ -29,36 +29,81 @@ func Connect() *Container {
 	}
 }
 
+/*
+참고
+	Created   ContainerStatus = iota //0
+	Running                          // 1
+	Exited                           // 2
+	ExitedErr                        // 3
+	Healthy                          // 4
+	Unhealthy                        // 5
+	Dead                             // 6
+	Paused                           // 7
+	UnKnown                          // 8
+	None                             // 9
+*/
+
 // RunE 8 is 'None' -> check podbridge config.go
-func (c *Container) RunE(a interface{}) (int, error) {
+func (c *Container) RunET(a interface{}) (int, error) {
 
 	n, ok := a.(*Node)
 	if ok {
-		r := createContainer(c.Context, n)
+		r := createContainerT(c.Context, n)
 		// 정상적인 종료
 		if r == 2 {
 			return r, nil
 		}
 		if r == 3 {
-			return 3, fmt.Errorf("cannot execute container")
+			return r, fmt.Errorf("cannot execute container")
 		}
 		if r == 5 {
-			return 5, fmt.Errorf("unhealthy")
+			return r, fmt.Errorf("unhealthy")
 		}
 		if r == 6 {
-			return 6, fmt.Errorf("container dead")
+			return r, fmt.Errorf("container dead")
 		}
 		/*if r == 7 {
 			return 7, fmt.Errorf("pause")
 		}*/
 		if r == 8 {
-			return 8, fmt.Errorf("node's ImageNme is empty")
+			return r, fmt.Errorf("node's ImageNme is empty")
 		}
 		if r == 9 {
-			return 9, fmt.Errorf("none")
+			return r, fmt.Errorf("none")
 		}
 	}
 	return 9, fmt.Errorf("none")
+}
+
+func (c *Container) RunE(a interface{}) (pbr.ContainerStatus, error) {
+
+	n, ok := a.(*Node)
+	if ok {
+		r := createContainer(c.Context, n)
+		// 정상적인 종료
+		if r == pbr.Exited {
+			return r, nil
+		}
+		if r == pbr.ExitedErr {
+			return r, fmt.Errorf("cannot execute container")
+		}
+		if r == pbr.Unhealthy {
+			return r, fmt.Errorf("unhealthy")
+		}
+		if r == pbr.Dead {
+			return r, fmt.Errorf("container dead")
+		}
+		/*if r == 7 {
+			return 7, fmt.Errorf("pause")
+		}*/
+		if r == pbr.UnKnown {
+			return r, fmt.Errorf("node's ImageNme is empty")
+		}
+		if r == pbr.UnKnown {
+			return r, fmt.Errorf("none")
+		}
+	}
+	return pbr.UnKnown, fmt.Errorf("none")
 }
 
 // CreateImage TODO healthCheckr 의 empty 검사만 하지만 실제로 healthchecker.sh 가 있는지 파악하는 구문 들어갈지 생각하자.
@@ -85,8 +130,7 @@ func (c *Container) CreateImage(a interface{}, healthChecker string) error {
 	return fmt.Errorf("cannot create node image")
 }
 
-//createContainer 각 노드의 이미지를 가지고 container 를 만들어줌. TODO 수정한다.
-func createContainer(ctx context.Context, n *Node) int {
+func createContainerT(ctx context.Context, n *Node) int {
 	// spec 만들기
 	conSpec := pbr.NewSpec()
 	if utils.IsEmptyString(n.ImageName) {
@@ -110,6 +154,32 @@ func createContainer(ctx context.Context, n *Node) int {
 
 	v := int(result)
 	return v
+}
+
+//createContainer 각 노드의 이미지를 가지고 container 를 만들어줌. TODO 수정한다.
+func createContainer(ctx context.Context, n *Node) pbr.ContainerStatus {
+	// spec 만들기
+	conSpec := pbr.NewSpec()
+	if utils.IsEmptyString(n.ImageName) {
+		return 8
+	}
+	conSpec.SetImage(n.ImageName)
+
+	f := func(spec pbr.SpecGen) pbr.SpecGen {
+		spec.Name = n.Id + "test"
+		spec.Terminal = true
+		return spec
+	}
+	conSpec.SetOther(f)
+	// 해당 이미지에 해당 shell script 가 있다.
+	conSpec.SetHealthChecker("CMD-SHELL /app/healthcheck/healthcheck.sh", "2s", 1, "30s", "1s")
+
+	// container 만들기
+	r := pbr.CreateContainer(ctx, conSpec)
+	fmt.Println("container Id is :", r.ID)
+	result := r.Run(ctx, "1s")
+
+	return result
 }
 
 // add by seoy
