@@ -44,11 +44,11 @@ func Connect() *Container {
 */
 
 // RunE 8 is 'None' -> check podbridge config.go
-func (c *Container) RunET(a interface{}) (int, error) {
+func (c *Container) RunE(a interface{}) (int, error) {
 
 	n, ok := a.(*Node)
 	if ok {
-		r := createContainerT(c.Context, n)
+		r := createContainer(c.Context, n)
 		// 정상적인 종료
 		if r == 2 {
 			return r, nil
@@ -75,11 +75,11 @@ func (c *Container) RunET(a interface{}) (int, error) {
 	return 9, fmt.Errorf("none")
 }
 
-func (c *Container) RunE(a interface{}) (pbr.ContainerStatus, error) {
+func (c *Container) RunET(a interface{}) (pbr.ContainerStatus, error) {
 
 	n, ok := a.(*Node)
 	if ok {
-		r := createContainer(c.Context, n)
+		r := createContainerT(c.Context, n)
 		// 정상적인 종료
 		if r == pbr.Exited {
 			return r, nil
@@ -130,7 +130,7 @@ func (c *Container) CreateImage(a interface{}, healthChecker string) error {
 	return fmt.Errorf("cannot create node image")
 }
 
-func createContainerT(ctx context.Context, n *Node) int {
+func createContainer(ctx context.Context, n *Node) int {
 	// spec 만들기
 	conSpec := pbr.NewSpec()
 	if utils.IsEmptyString(n.ImageName) {
@@ -157,7 +157,7 @@ func createContainerT(ctx context.Context, n *Node) int {
 }
 
 //createContainer 각 노드의 이미지를 가지고 container 를 만들어줌. TODO 수정한다.
-func createContainer(ctx context.Context, n *Node) pbr.ContainerStatus {
+func createContainerT(ctx context.Context, n *Node) pbr.ContainerStatus {
 	// spec 만들기
 	conSpec := pbr.NewSpec()
 	if utils.IsEmptyString(n.ImageName) {
