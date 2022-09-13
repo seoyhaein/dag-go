@@ -26,14 +26,14 @@ func TestNewPipeline(t *testing.T) {
 		panic(err)
 	}
 	//TODO 일단 구현에서 빠진 부분을 일단 보완하고 추가적으로 진행한다.
-	copy := CopyDag(d, "78")
+	copied := CopyDag(d, "78")
 	ctx := context.Background()
-	copy.ConnectRunner()
+	copied.ConnectRunner()
 	//copy.DagSetFunc()
-	copy.GetReady(ctx)
-	copy.Start()
+	copied.GetReady(ctx)
+	copied.Start()
 	//time.Sleep(time.Second * 10)
-	copy.Wait(ctx)
+	copied.Wait(ctx)
 
 	//copy := CopyDag(d)
 	/*ctx := context.Background()
