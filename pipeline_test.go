@@ -86,6 +86,8 @@ func TestNewPipeline01(t *testing.T) {
 	d.Wait(ctx)*/
 }
 
+// TODO 추후에 개선하자.
+// https://www.practical-go-lessons.com/chap-34-benchmarks
 func BenchmarkStart(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		demo(1)
