@@ -295,6 +295,8 @@ xml 에서 파싱을 해서 가져오는 것은 가능하다. 다음으로, 처�
 15. time.duration 이 전역적으로 적용되고 적용된 값에서 전체적으로 감소하여서 적용될 수 있도록 한다.
 16. xml 형식 정의 해놓는다.
 18. 로그기록 stdin, stdout, stderr
+19. github-action 으로 바꾸기 (스터디 필요)
+20. golang 버전 업 
 
 
 ### Done
