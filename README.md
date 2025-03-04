@@ -24,3 +24,4 @@
 ```
 - id string 체크 해줘야 함.
 - node, dag, edge, vertex 개념을 정리하자. edge 는 현재 dag 에 정의 되어 있다. 그리고, vertex 는 edge 에 있다.
+- travis 안되서 github action 으로 바꾸자.  
