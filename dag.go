@@ -142,7 +142,7 @@ func (dag *Dag) createNode(id string) *Node {
 	return node
 }
 
-//AddEdge error log 는 일단 여기서만 작성
+// AddEdge error log 는 일단 여기서만 작성
 func (dag *Dag) AddEdge(from, to string) error {
 
 	if from == to {
@@ -369,6 +369,69 @@ func (dag *Dag) detectCycle(startNodeId string, endNodeId string, visit map[stri
 	return cycle, end
 }
 
+// gpt 수정 버전본.
+func (dag *Dag) detectCycleT(startNodeId string, endNodeId string, visit map[string]bool) (bool, bool) {
+	var (
+		nextNode    *Node // The next node to visit
+		currentNode *Node // The current node being visited
+		curId       string
+		cycle       bool // True if a cycle is detected
+		end         bool // True if the entire graph has been traversed
+	)
+
+	// Clone the graph and check for a cycle.
+	ns, check := cloneGraph(dag.nodes)
+	if check {
+		return true, false // A cycle was detected during cloning
+	}
+
+	curId = endNodeId
+	cycle = false
+	end = false
+
+	// If all nodes are visited, but there are still children left to visit, then it is a cycle.
+	if checkVisit(visit) {
+		n := getNode(endNodeId, dag.nodes)
+		if len(n.children) > 0 {
+			return true, end // It's a cycle
+		}
+	}
+
+	// Mark the current node as visited.
+	visit[endNodeId] = true
+
+	// Perform a Depth First Search (DFS).
+	currentNode = getNode(endNodeId, ns)
+	if currentNode != nil {
+		nextNode = getNextNode(currentNode)
+		if nextNode != nil {
+			endNodeId = nextNode.Id
+		}
+	}
+
+	for nextNode != nil {
+		// Recursive call to detect cycles.
+		cycle, end = dag.detectCycle(startNodeId, endNodeId, visit)
+		if end || cycle {
+			return cycle, end // If a cycle is detected or all nodes are visited, exit the loop.
+		}
+
+		// Move to the next node.
+		parentNode := getNode(curId, ns)
+		if parentNode != nil {
+			nextNode = getNextNode(parentNode)
+			if nextNode != nil {
+				endNodeId = nextNode.Id
+				end = false
+			}
+			end = true
+			nextNode = nil
+		}
+	}
+
+	return cycle, end
+}
+
 func (dag *Dag) ConnectRunner() bool {
 	n := len(dag.nodes)
 	if n < 1 {
@@ -540,7 +603,7 @@ func (dag *Dag) Wait(ctx context.Context) bool {
 		if dag.bTimeout {
 			select {
 			case c := <-dag.RunningStatus:
-				printRunningStatus(c)
+				//printRunningStatus(c)
 				if c.nodeId == EndNode {
 					if c.rStatus == PreflightFailed {
 						return false
@@ -563,7 +626,7 @@ func (dag *Dag) Wait(ctx context.Context) bool {
 		} else {
 			select {
 			case c := <-dag.RunningStatus:
-				printRunningStatus(c)
+				//printRunningStatus(c)
 				if c.nodeId == EndNode {
 					if c.rStatus == PreflightFailed {
 						return false
@@ -882,7 +945,7 @@ func nodeExist(dag *Dag, nodeId string) (*Node, bool) {
 	return nil, false
 }
 
-//findEdges 같은게 있으면 -1, 같은게 없으면 0
+// findEdges 같은게 있으면 -1, 같은게 없으면 0
 func findEdges(es []*Edge, parentId, childId string) int {
 	for _, e := range es {
 		if e.parentId == parentId && e.childId == childId {
@@ -912,7 +975,7 @@ func findEdgeFromChildId(es []*Edge, Id string) []*Edge {
 	return r
 }
 
-//printRunningStatus TODO context cancel 관련 해서 추가 해줘야 하고 start() 같은 경우도 처리 해줘야 한다.
+// printRunningStatus TODO context cancel 관련 해서 추가 해줘야 하고 start() 같은 경우도 처리 해줘야 한다.
 // TODO 나중에 수정해주자.
 func printRunningStatus(status *printStatus) {
 	var r string

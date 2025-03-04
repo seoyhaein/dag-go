@@ -3,11 +3,10 @@ package dag_go
 import (
 	"context"
 	"fmt"
+	"golang.org/x/sync/errgroup"
 	"strings"
-
 	// (do not erase) goroutine 디버깅용
 	//"github.com/dlsniper/debugger"
-	"golang.org/x/sync/errgroup"
 )
 
 type Node struct {
@@ -66,6 +65,7 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 		eg.Go(func() error {
 			result := <-c
 			if result == Failed {
+				fmt.Println("failed", n.Id)
 				return fmt.Errorf("failed")
 			}
 			return nil
@@ -73,9 +73,11 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 	}
 	if err := eg.Wait(); err == nil { // 대기
 		n.succeed = true
+		fmt.Println("Preflight", n.Id)
 		return &printStatus{Preflight, n.Id}
 	}
 	n.succeed = false
+	fmt.Println("PreflightFailed", n.Id)
 	return &printStatus{PreflightFailed, noNodeId}
 }
 
@@ -166,8 +168,10 @@ func inFlight(n *Node) *printStatus {
 		}
 	}
 	if n.succeed {
+		fmt.Println("InFlight", n.Id)
 		return &printStatus{InFlight, n.Id}
 	} else {
+		fmt.Println("InFlightFailed", n.Id)
 		return &printStatus{InFlightFailed, n.Id}
 	}
 }
@@ -186,6 +190,7 @@ func postFlight(n *Node) *printStatus {
 		}
 	})*/
 	if n.Id == EndNode {
+		fmt.Println("FlightEnd", n.Id)
 		return &printStatus{FlightEnd, n.Id}
 	}
 
@@ -203,6 +208,7 @@ func postFlight(n *Node) *printStatus {
 			close(c)
 		}
 	}
+	fmt.Println("PostFlight", n.Id)
 	return &printStatus{PostFlight, n.Id}
 }
 
@@ -229,7 +235,7 @@ func getNode(s string, ns map[string]*Node) *Node {
 	return n
 }
 
-//getNextNode The first node to enter is fetched and the corresponding node is deleted.
+// getNextNode The first node to enter is fetched and the corresponding node is deleted.
 func getNextNode(n *Node) *Node {
 
 	if n == nil {
