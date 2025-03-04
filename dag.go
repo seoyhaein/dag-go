@@ -10,6 +10,62 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+type (
+	runningStatus int
+
+	printStatus struct {
+		rStatus runningStatus
+		nodeId  string
+	}
+)
+
+// createEdgeErrorType 0 if created, 1 if exists, 2 if error.
+type createEdgeErrorType int
+
+const (
+	Create createEdgeErrorType = iota
+	Exist
+	Fault
+)
+
+// The status displayed when running the runner on each node.
+const (
+	Start runningStatus = iota
+	Preflight
+	PreflightFailed
+	InFlight
+	InFlightFailed
+	PostFlight
+	PostFlightFailed
+	FlightEnd
+	Failed
+	Succeed
+)
+
+const (
+	nodes   = "nodes"
+	node    = "node"
+	id      = "id"
+	from    = "from"
+	to      = "to"
+	command = "command"
+)
+
+const (
+	StartNode = "start_node"
+	EndNode   = "end_node"
+)
+
+// It is the node ID when the condition that the node cannot be created.
+const noNodeId = "-1"
+
+// channel buffer size
+const (
+	Max           int = 100
+	Min           int = 1
+	StatusDefault int = 3
+)
+
 // Dag (Directed Acyclic Graph) is an acyclic graph, not a cyclic graph.
 // In other words, there is no cyclic cycle in the DAG algorithm, and it has only one direction.
 type Dag struct {
@@ -47,23 +103,18 @@ type Edge struct {
 // And this channel is not included in Edge.
 // TODO 파라미터 nil 허용해주도록 바꿔줄지 생각함.
 func NewDag() *Dag {
-	dag := new(Dag)
-	dag.nodes = make(map[string]*Node)
-	dag.Id = uuid.NewString()
-	dag.validated = false
-	dag.StartNode = dag.createNode(StartNode)
-
-	// 시작할때 넣어주는 채널 여기서 세팅된다.
-	// error message : 중복된 node id 로 노드를 생성하려고 했습니다, createNode
-	if dag.StartNode == nil {
+	dag := &Dag{
+		nodes:         make(map[string]*Node),
+		Id:            uuid.NewString(),
+		RunningStatus: make(chan *printStatus, Max),
+	}
+	// TODO 이부분은 한번 생각해보자. 팩토리 메서드에서 아래 노드를 생성하고 채널을 추가하는게 맞는지, 이걸 따로 메서드로 빼는게 낫지 않을까?
+	// StartNode 생성 및 검증
+	if dag.StartNode = dag.createNode(StartNode); dag.StartNode == nil {
 		return nil
 	}
-	// 시작노드는 반드시 하나의 채널을 넣어 줘야 한다.
-	// start 함수에서 채널 값을 넣어준다.
+	// 시작 노드에 필수 채널 추가 (parentVertex 채널 삽입)
 	dag.StartNode.parentVertex = append(dag.StartNode.parentVertex, make(chan runningStatus, Min))
-	// TODO check
-	dag.RunningStatus = make(chan *printStatus, Max)
-
 	return dag
 }
 
@@ -78,19 +129,19 @@ func (dag *Dag) createEdge(parentId, childId string) (*Edge, createEdgeErrorType
 		return nil, Fault
 	}
 
-	r := findEdges(dag.Edges, parentId, childId)
-
-	if r == -1 {
+	// 이미 존재하는 엣지 확인
+	if edgeExists(dag.Edges, parentId, childId) {
 		return nil, Exist
 	}
-	cm := new(Edge)
-	cm.parentId = parentId
-	cm.childId = childId
-	cm.vertex = make(chan runningStatus, Min)
-	dag.Edges = append(dag.Edges, cm)
 
-	return cm, Create
+	edge := &Edge{
+		parentId: parentId,
+		childId:  childId,
+		vertex:   make(chan runningStatus, Min),
+	}
 
+	dag.Edges = append(dag.Edges, edge)
+	return edge, Create
 }
 
 func (dag *Dag) getVertex(parentId, childId string) chan runningStatus {
@@ -121,15 +172,12 @@ func (dag *Dag) checkEdges() bool {
 
 // createNode creates a pointer to a new node, but returns nil if dag has a duplicate node id.
 func (dag *Dag) createNode(id string) *Node {
-
-	for _, n := range dag.nodes {
-		if n.Id == id {
-			return nil
-		}
+	// 이미 해당 id의 노드가 존재하면 nil 반환
+	if _, exists := dag.nodes[id]; exists {
+		return nil
 	}
-
 	var node *Node
-
+	// TODO StartNode 와 EndNode 의 경우 ContainerCmd 이게 없을 수 있으므로 이렇게 한듯한데. 살펴보자.
 	if dag.ContainerCmd != nil {
 		node = createNode(id, dag.ContainerCmd)
 	} else {
@@ -142,133 +190,150 @@ func (dag *Dag) createNode(id string) *Node {
 	return node
 }
 
-// AddEdge error log 는 일단 여기서만 작성
+// AddEdge error log 는 일단 여기서만 작성 TODO 로그를 기록하는 것을 활용할 방안 찾기, 또는 필요없으면 지우기.
 func (dag *Dag) AddEdge(from, to string) error {
+	// 에러 로그를 기록하고 반환하는 클로저 함수
+	// TODO 이걸 빼서 메서드를 만들지 고민하자.
+	logErr := func(err error) error {
+		dag.errLogs = append(dag.errLogs, &systemError{AddEdge, err})
+		return err
+	}
 
+	// 입력값 검증
 	if from == to {
-		err := fmt.Errorf("from-node and to-node are same")
-		dag.errLogs = append(dag.errLogs, &systemError{AddEdge, err})
-		return err
+		return logErr(fmt.Errorf("from-node and to-node are same"))
 	}
-
 	if utils.IsEmptyString(from) {
-		err := fmt.Errorf("from-node is emtpy string")
-		dag.errLogs = append(dag.errLogs, &systemError{AddEdge, err})
-		return err
+		return logErr(fmt.Errorf("from-node is empty string"))
 	}
-
 	if utils.IsEmptyString(to) {
-		err := fmt.Errorf("to-node is emtpy string")
-		dag.errLogs = append(dag.errLogs, &systemError{AddEdge, err})
+		return logErr(fmt.Errorf("to-node is empty string"))
+	}
+
+	// 노드를 가져오거나 생성하는 클로저 함수
+	getOrCreateNode := func(id string) (*Node, error) {
+		if node := dag.nodes[id]; node != nil {
+			return node, nil
+		}
+		node := dag.createNode(id)
+		if node == nil {
+			return nil, logErr(fmt.Errorf("%s: createNode returned nil", id))
+		}
+		return node, nil
+	}
+
+	fromNode, err := getOrCreateNode(from)
+	if err != nil {
+		return err
+	}
+	toNode, err := getOrCreateNode(to)
+	if err != nil {
 		return err
 	}
 
-	fromNode := dag.nodes[from]
-	if fromNode == nil {
-		fromNode = dag.createNode(from)
-
-		if fromNode == nil {
-			err := fmt.Errorf("fromNode: createNode return nil")
-			dag.errLogs = append(dag.errLogs, &systemError{AddEdge, err})
-			return err
-		}
-	}
-	toNode := dag.nodes[to]
-	if toNode == nil {
-		toNode = dag.createNode(to)
-		if toNode == nil {
-			err := fmt.Errorf("toNode: createNode return nil")
-			dag.errLogs = append(dag.errLogs, &systemError{AddEdge, err})
-			return err
-		}
-	}
-
+	// 자식과 부모 관계 설정
 	fromNode.children = append(fromNode.children, toNode)
 	toNode.parent = append(toNode.parent, fromNode)
 
+	// 엣지 생성 및 검증
 	edge, check := dag.createEdge(fromNode.Id, toNode.Id)
-
 	if check == Fault || check == Exist {
-		err := fmt.Errorf("edge cannot be created")
-		dag.errLogs = append(dag.errLogs, &systemError{AddEdge, err})
-		return err
+		return logErr(fmt.Errorf("edge cannot be created"))
+	}
+	if edge == nil {
+		return logErr(fmt.Errorf("vertex is nil"))
 	}
 
-	if edge != nil {
-		fromNode.childrenVertex = append(fromNode.childrenVertex, edge.vertex)
-		toNode.parentVertex = append(toNode.parentVertex, edge.vertex)
-	} else {
-		err := fmt.Errorf("vertex is nil")
-		dag.errLogs = append(dag.errLogs, &systemError{AddEdge, err})
-		return err
-	}
+	fromNode.childrenVertex = append(fromNode.childrenVertex, edge.vertex)
+	toNode.parentVertex = append(toNode.parentVertex, edge.vertex)
 	return nil
 }
 
+// TODO startNode 같은 경우는 NewDag 에서 만들어 줌. 이거 생각해봐야 함.
 func (dag *Dag) addEndNode(fromNode, toNode *Node) error {
-
+	// 입력 노드 검증
 	if fromNode == nil {
-		return fmt.Errorf("fromeNode is nil")
+		return fmt.Errorf("fromNode is nil")
 	}
 	if toNode == nil {
 		return fmt.Errorf("toNode is nil")
 	}
 
+	// 부모-자식 관계 설정
 	fromNode.children = append(fromNode.children, toNode)
 	toNode.parent = append(toNode.parent, fromNode)
 
+	// 엣지 생성 및 체크
 	edge, check := dag.createEdge(fromNode.Id, toNode.Id)
 	if check == Fault || check == Exist {
 		return fmt.Errorf("edge cannot be created")
 	}
-	//v := dag.getVertex(fromNode.Id, toNode.Id)
-
-	if edge != nil {
-		fromNode.childrenVertex = append(fromNode.childrenVertex, edge.vertex)
-		toNode.parentVertex = append(toNode.parentVertex, edge.vertex)
-	} else {
+	if edge == nil {
 		return fmt.Errorf("vertex is nil")
 	}
+
+	// 엣지의 vertex 양쪽 노드에 추가
+	fromNode.childrenVertex = append(fromNode.childrenVertex, edge.vertex)
+	toNode.parentVertex = append(toNode.parentVertex, edge.vertex)
+
 	return nil
 }
 
 // FinishDag finally, connect end_node to dag
 func (dag *Dag) FinishDag() error {
+	// 에러 로그를 기록하고 반환하는 클로저 함수 (finishDag 에러 타입 사용)
+	logErr := func(err error) error {
+		dag.errLogs = append(dag.errLogs, &systemError{finishDag, err})
+		return err
+	}
 
+	// 이미 검증이 완료된 경우
 	if dag.validated {
-		return fmt.Errorf("validated is already set to true")
+		return logErr(fmt.Errorf("validated is already set to true"))
 	}
 
+	// 노드가 하나도 없는 경우
 	if len(dag.nodes) == 0 {
-		return fmt.Errorf("no node")
-	}
-	temp := make(map[string]*Node)
-	for k, v := range dag.nodes {
-		temp[k] = v
+		return logErr(fmt.Errorf("no node"))
 	}
 
+	// 안전한 반복을 위해 노드 슬라이스를 생성 (맵의 구조 변경 방지를 위해)
+	nodes := make([]*Node, 0, len(dag.nodes))
+	for _, n := range dag.nodes {
+		nodes = append(nodes, n)
+	}
+
+	// 종료 노드 생성 및 초기화
 	dag.EndNode = dag.createNode(EndNode)
-	//TODO check add by seoy
+	if dag.EndNode == nil {
+		return logErr(fmt.Errorf("failed to create end node"))
+	}
 	dag.EndNode.succeed = true
-	for _, n := range temp {
+
+	// 각 노드에 대해 검증 및 종료 노드로의 연결 작업 수행
+	for _, n := range nodes {
+		// 부모와 자식이 없는 고립된 노드가 있는 경우
 		if len(n.children) == 0 && len(n.parent) == 0 {
-			if len(temp) == 1 {
+			if len(nodes) == 1 {
+				// 노드가 단 하나일 경우, 반드시 시작 노드여야 함.
 				if n.Id != StartNode {
-					return fmt.Errorf("there is an invalid node")
+					return logErr(fmt.Errorf("invalid node: only node is not the start node"))
 				}
 			} else {
-				return fmt.Errorf("there are nodes that have no parent node and no child nodes")
+				return logErr(fmt.Errorf("node '%s' has no parent and no children", n.Id))
 			}
 		}
+
+		// 종료 노드가 아니면서 자식이 없는 경우, 종료 노드와 연결
 		if n.Id != EndNode && len(n.children) == 0 {
-			err := dag.addEndNode(n, dag.EndNode)
-			if err != nil {
-				return fmt.Errorf("addEndNode failed")
+			if err := dag.addEndNode(n, dag.EndNode); err != nil {
+				return logErr(fmt.Errorf("addEndNode failed for node '%s': %w", n.Id, err))
 			}
 		}
 	}
-	dag.validated = true
 
+	// 검증 완료 플래그 설정
+	dag.validated = true
 	return nil
 }
 
@@ -737,7 +802,7 @@ func (dag *Dag) debugLog() {
 	if len(dag.errLogs) > 0 {
 
 		for _, v := range dag.errLogs {
-			log.Printf(
+			Log.Printf(
 				"error type: %d\n reaseon:%s\n",
 				v.errorType, v.reason.Error(),
 			)
@@ -923,6 +988,8 @@ func CopyEdge(original []*Edge) (copied []*Edge) {
 	return
 }
 
+// internal methods
+
 func findNode(ns []*Node, id string) *Node {
 	if ns == nil {
 		return nil
@@ -945,7 +1012,8 @@ func nodeExist(dag *Dag, nodeId string) (*Node, bool) {
 	return nil, false
 }
 
-// findEdges 같은게 있으면 -1, 같은게 없으면 0
+// Deprecated: Use edgeExists instead.
+// findEdges returns -1 if an edge with the same parentId and childId exists, or 0 if not.
 func findEdges(es []*Edge, parentId, childId string) int {
 	for _, e := range es {
 		if e.parentId == parentId && e.childId == childId {
@@ -953,6 +1021,15 @@ func findEdges(es []*Edge, parentId, childId string) int {
 		}
 	}
 	return 0
+}
+
+func edgeExists(es []*Edge, parentId, childId string) bool {
+	for _, e := range es {
+		if e.parentId == parentId && e.childId == childId {
+			return true
+		}
+	}
+	return false
 }
 
 func findEdgeFromParentId(es []*Edge, Id string) []*Edge {

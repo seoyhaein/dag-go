@@ -1,14 +1,5 @@
 package dag_go
 
-import (
-	"github.com/sirupsen/logrus"
-)
-
-// https://github.com/sirupsen/logrus
-// https://blog.advenoh.pe.kr/go/Go%EC%97%90%EC%84%9C%EC%9D%98-%EB%A1%9C%EA%B7%B8%EA%B9%85-Logging-in-Go/
-// TODO config 에 있는 것과 통일하자.
-var log = logrus.New()
-
 type (
 	ErrorType int
 

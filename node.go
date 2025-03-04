@@ -333,20 +333,17 @@ func cloneGraph(ns map[string]*Node) (map[string]*Node, bool) {
 	return visited, iscycle
 }
 
-// createNode add by seoy
-func createNode(id string, r Runnable) (node *Node) {
-	node = &Node{
+func createNode(id string, r Runnable) *Node {
+	return &Node{
 		Id:         id,
 		RunCommand: r,
 	}
-	return
 }
 
-func createNodeWithId(id string) (node *Node) {
-	node = &Node{
+func createNodeWithId(id string) *Node {
+	return &Node{
 		Id: id,
 	}
-	return
 }
 
 // Execute 이것을 작성하면 된다.
