@@ -8,11 +8,14 @@ import (
 // internal methods 테스트 기준. 특정 exported method 에서 한번 사용되면 해당 메서드를 테스트 해서 간접 테스트함.
 // 하지만, 여러번 쓰이면 독립적으로 테스트 함.
 
-func TestNewDag(t *testing.T) {
-	// NewDag 호출하여 새로운 Dag 인스턴스 생성
-	dag := NewDag()
+func TestInitDag(t *testing.T) {
+	// InitDag 호출하여 새로운 Dag 인스턴스 생성
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag failed: %v", err)
+	}
 	if dag == nil {
-		t.Fatal("NewDag returned nil")
+		t.Fatal("InitDag returned nil")
 	}
 
 	// StartNode 가 nil 이 아닌지 확인
@@ -120,9 +123,158 @@ func TestCreateNode(t *testing.T) {
 	}
 }
 
+func TestCreateEdge(t *testing.T) {
+	// 새로운 Dag 인스턴스 생성 (노드와 엣지 초기화)
+	dag := &Dag{
+		nodes: make(map[string]*Node),
+		Edges: []*Edge{},
+	}
+
+	// Case 1: parentId가 빈 문자열인 경우 -> Fault 반환
+	edge, errType := dag.createEdge("", "child")
+	if edge != nil {
+		t.Errorf("expected nil edge when parentId is empty, got %+v", edge)
+	}
+	if errType != Fault {
+		t.Errorf("expected error type Fault when parentId is empty, got %v", errType)
+	}
+
+	// Case 2: childId가 빈 문자열인 경우 -> Fault 반환
+	edge, errType = dag.createEdge("parent", "")
+	if edge != nil {
+		t.Errorf("expected nil edge when childId is empty, got %+v", edge)
+	}
+	if errType != Fault {
+		t.Errorf("expected error type Fault when childId is empty, got %v", errType)
+	}
+
+	// Case 3: 정상적인 엣지 생성
+	parentId := "p1"
+	childId := "c1"
+	edge, errType = dag.createEdge(parentId, childId)
+	if edge == nil {
+		t.Fatalf("expected edge to be created, got nil")
+	}
+	if errType != Create {
+		t.Errorf("expected error type Create, got %v", errType)
+	}
+	if edge.parentId != parentId || edge.childId != childId {
+		t.Errorf("edge fields mismatch: got parentId=%s, childId=%s; expected parentId=%s, childId=%s",
+			edge.parentId, edge.childId, parentId, childId)
+	}
+	// vertex 채널의 용량(capacity)이 Min과 동일한지 확인
+	if cap(edge.vertex) != Min {
+		t.Errorf("expected vertex channel capacity to be %d, got %d", Min, cap(edge.vertex))
+	}
+	// dag.Edges 에 엣지가 추가되었는지 확인
+	if len(dag.Edges) != 1 {
+		t.Errorf("expected dag.Edges length to be 1, got %d", len(dag.Edges))
+	}
+
+	// Case 4: 중복된 엣지 생성 시도 -> nil 과 Exist 에러 반환
+	dupEdge, dupErrType := dag.createEdge(parentId, childId)
+	if dupEdge != nil {
+		t.Errorf("expected duplicate edge creation to return nil, got %+v", dupEdge)
+	}
+	if dupErrType != Exist {
+		t.Errorf("expected error type Exist on duplicate edge creation, got %v", dupErrType)
+	}
+}
+
+// TestCreateEdge 이게 성공해야지 의미가 있음.
+func TestAddEdge(t *testing.T) {
+	// 새로운 Dag 인스턴스 생성 (NewDag 사용)
+	dag := NewDag()
+	if dag == nil {
+		t.Fatal("NewDag returned nil")
+	}
+
+	// ----- 입력 검증 테스트 -----
+	// Case 1: from 와 to가 같은 경우
+	err := dag.AddEdge("node1", "node1")
+	if err == nil {
+		t.Error("expected error when from and to are the same, got nil")
+	}
+
+	// Case 2: from 가 빈 문자열인 경우
+	err = dag.AddEdge("", "node2")
+	if err == nil {
+		t.Error("expected error when from is empty, got nil")
+	}
+
+	// Case 3: to가 빈 문자열인 경우
+	err = dag.AddEdge("node1", "")
+	if err == nil {
+		t.Error("expected error when to is empty, got nil")
+	}
+
+	// ----- 정상적인 엣지 추가 테스트 -----
+	// 유효한 입력: "node1" -> "node2"
+	err = dag.AddEdge("node1", "node2")
+	if err != nil {
+		t.Fatalf("unexpected error on valid AddEdge: %v", err)
+	}
+
+	// 노드 "node1"와 "node2"가 dag.nodes 에 등록되었는지 확인
+	node1, ok := dag.nodes["node1"]
+	if !ok || node1 == nil {
+		t.Fatal("node1 not found in dag.nodes")
+	}
+	node2, ok := dag.nodes["node2"]
+	if !ok || node2 == nil {
+		t.Fatal("node2 not found in dag.nodes")
+	}
+
+	// node1의 자식 리스트에 node2가 포함되어 있는지 확인
+	found := false
+	for _, child := range node1.children {
+		if child.Id == "node2" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("node2 not found as a child of node1")
+	}
+
+	// node2의 부모 리스트에 node1이 포함되어 있는지 확인
+	found = false
+	for _, parent := range node2.parent {
+		if parent.Id == "node1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("node1 not found as a parent of node2")
+	}
+
+	// dag.Edges 슬라이스에 엣지가 추가되었는지 확인 (정확히 1개의 엣지)
+	if len(dag.Edges) != 1 {
+		t.Errorf("expected 1 edge in dag.Edges, got %d", len(dag.Edges))
+	}
+
+	// node1의 childrenVertex 와 node2의 parentVertex 가 채워졌는지 확인
+	if len(node1.childrenVertex) == 0 {
+		t.Error("expected node1.childrenVertex to have at least one channel")
+	}
+	if len(node2.parentVertex) == 0 {
+		t.Error("expected node2.parentVertex to have at least one channel")
+	}
+
+	// ----- 중복 엣지 생성 테스트 -----
+	// 동일한 from, to 값으로 다시 엣지를 추가하면 오류가 발생해야 함.
+	err = dag.AddEdge("node1", "node2")
+	if err == nil {
+		t.Error("expected error on duplicate edge creation, got nil")
+	}
+}
+
+// dag.ConnectRunner() 테스트 해야 하는데 여기서 부터는 Node 먼저 테스트 해야함.
+
 func TestSimpleDag(t *testing.T) {
 	// runnable := Connect()
-	dag := NewDag()
+	dag, _ := InitDag()
 	// dag.SetContainerCmd(runnable)
 
 	// 엣지 추가
@@ -166,7 +318,7 @@ func TestSimpleDag(t *testing.T) {
 
 func TestDetectCycle(t *testing.T) {
 	// 새로운 DAG 생성
-	dag := NewDag()
+	dag, _ := InitDag()
 
 	// 엣지 추가
 	if err := dag.AddEdge(dag.StartNode.Id, "1"); err != nil {

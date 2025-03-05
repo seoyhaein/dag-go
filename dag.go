@@ -101,21 +101,30 @@ type Edge struct {
 // NewDag creates a pointer to the Dag structure.
 // One channel must be put in the start node. Enter this channel value in the start function.
 // And this channel is not included in Edge.
-// TODO 파라미터 nil 허용해주도록 바꿔줄지 생각함.
 func NewDag() *Dag {
 	dag := &Dag{
 		nodes:         make(map[string]*Node),
 		Id:            uuid.NewString(),
 		RunningStatus: make(chan *printStatus, Max),
 	}
-	// TODO 이부분은 한번 생각해보자. 팩토리 메서드에서 아래 노드를 생성하고 채널을 추가하는게 맞는지, 이걸 따로 메서드로 빼는게 낫지 않을까?
-	// StartNode 생성 및 검증
+	return dag
+}
+
+func (dag *Dag) StartDag() (*Dag, error) {
 	if dag.StartNode = dag.createNode(StartNode); dag.StartNode == nil {
-		return nil
+		return nil, fmt.Errorf("failed to create start node")
 	}
 	// 시작 노드에 필수 채널 추가 (parentVertex 채널 삽입)
 	dag.StartNode.parentVertex = append(dag.StartNode.parentVertex, make(chan runningStatus, Min))
-	return dag
+	return dag, nil
+}
+
+func InitDag() (*Dag, error) {
+	dag := NewDag()
+	if dag == nil {
+		return nil, fmt.Errorf("failed to run NewDag")
+	}
+	return dag.StartDag()
 }
 
 func (dag *Dag) SetContainerCmd(r Runnable) {
@@ -192,8 +201,8 @@ func (dag *Dag) createNode(id string) *Node {
 
 // AddEdge error log 는 일단 여기서만 작성 TODO 로그를 기록하는 것을 활용할 방안 찾기, 또는 필요없으면 지우기.
 func (dag *Dag) AddEdge(from, to string) error {
-	// 에러 로그를 기록하고 반환하는 클로저 함수
 	// TODO 이걸 빼서 메서드를 만들지 고민하자.
+	// 에러 로그를 기록하고 반환하는 클로저 함수
 	logErr := func(err error) error {
 		dag.errLogs = append(dag.errLogs, &systemError{AddEdge, err})
 		return err
@@ -881,6 +890,7 @@ func copyDag(original *Dag) (map[string]*Node, []*Edge) {
 	nodes = make(map[string]*Node, len(original.nodes))
 
 	// 1. 먼저 모든 노드들을 복사한다. (노드자체 가존재하지 않을 수 있으므로 부모 자식 아직 추가 않해줌.)
+	// TODO 아래 shallow copy 가 이루어지는 부분이 있는데, 이것까지 copy 해야할 지 생각해야함.
 	for _, n := range original.nodes {
 		node := new(Node)
 		node.Id = n.Id
@@ -971,21 +981,19 @@ func CopyDag(original *Dag, Id string) (copied *Dag) {
 	return
 }
 
-func CopyEdge(original []*Edge) (copied []*Edge) {
-	edges := len(original)
-	if edges < 1 {
+func CopyEdge(original []*Edge) []*Edge {
+	if len(original) == 0 {
 		return nil
 	}
-	copied = make([]*Edge, edges)
-	for i := 0; i < edges; i++ {
-		e := new(Edge)
-		e.parentId = original[i].parentId
-		e.childId = original[i].childId
-		e.vertex = make(chan runningStatus, Min)
-
-		copied[i] = e
+	copied := make([]*Edge, len(original))
+	for i, orig := range original {
+		copied[i] = &Edge{
+			parentId: orig.parentId,
+			childId:  orig.childId,
+			vertex:   make(chan runningStatus, Min),
+		}
 	}
-	return
+	return copied
 }
 
 // internal methods
@@ -1023,33 +1031,38 @@ func findEdges(es []*Edge, parentId, childId string) int {
 	return 0
 }
 
-func edgeExists(es []*Edge, parentId, childId string) bool {
-	for _, e := range es {
-		if e.parentId == parentId && e.childId == childId {
+func edgeExists(edges []*Edge, parentId, childId string) bool {
+	for _, edge := range edges {
+		if edge.parentId == parentId && edge.childId == childId {
 			return true
 		}
 	}
 	return false
 }
 
-func findEdgeFromParentId(es []*Edge, Id string) []*Edge {
-	var r []*Edge
-	for _, e := range es {
-		if e.parentId == Id {
-			r = append(r, e)
+// findEdgeFromParentId 는 주어진 Edge 슬라이스에서
+// parentId가 전달된 id와 일치하는 모든 Edge 들을 필터링하여 반환함
+func findEdgeFromParentId(es []*Edge, id string) []*Edge {
+	var filteredEdges []*Edge
+	for _, edge := range es {
+		if edge.parentId == id {
+			filteredEdges = append(filteredEdges, edge)
 		}
 	}
-	return r
+	return filteredEdges
 }
 
-func findEdgeFromChildId(es []*Edge, Id string) []*Edge {
-	var r []*Edge
-	for _, e := range es {
-		if e.childId == Id {
-			r = append(r, e)
+// findEdgeFromChildId는 주어진 Edge 슬라이스에서
+// childId가 전달된 id와 일치하는 모든 Edge 들을 필터링하여 반환함
+func findEdgeFromChildId(es []*Edge, id string) []*Edge {
+	var filteredEdges []*Edge // 결과를 저장할 슬라이스
+	for _, edge := range es {
+		// edge 의 childId가 입력된 id와 일치하면 filteredEdges 에 추가
+		if edge.childId == id {
+			filteredEdges = append(filteredEdges, edge)
 		}
 	}
-	return r
+	return filteredEdges
 }
 
 // printRunningStatus TODO context cancel 관련 해서 추가 해줘야 하고 start() 같은 경우도 처리 해줘야 한다.
