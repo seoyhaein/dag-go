@@ -117,6 +117,51 @@ func preFlightT(ctx context.Context, n *Node) *printStatus {
 	return &printStatus{PreflightFailed, noNodeId}
 }
 
+func preFlightCombined(ctx context.Context, n *Node) *printStatus {
+	if n == nil {
+		panic(fmt.Errorf("node is nil"))
+	}
+
+	// errgroup 와 새로운 컨텍스트 생성
+	eg, ctx := errgroup.WithContext(ctx)
+	i := len(n.parentVertex)
+	var try bool = true
+
+	for j := 0; j < i; j++ {
+		k := j // closure 캡처 문제 해결
+		c := n.parentVertex[k]
+		// TryGo를 사용하여 고루틴을 실행
+		try = eg.TryGo(func() error {
+			select {
+			case result := <-c:
+				if result == Failed {
+					return fmt.Errorf("node %s: parent channel returned Failed", n.Id)
+				}
+				return nil
+			case <-ctx.Done():
+				// 컨텍스트 취소 시 에러 반환
+				return ctx.Err()
+			}
+		})
+		// 만약 TryGo가 false 를 반환했다면, 더 이상 고루틴 실행을 시도하지 않음
+		if !try {
+			break
+		}
+	}
+
+	// 모든 고루틴이 종료될 때까지 기다림
+	err := eg.Wait()
+	if err == nil && try {
+		n.succeed = true
+		fmt.Println("Preflight succeeded for node", n.Id)
+		return &printStatus{Preflight, n.Id}
+	}
+
+	n.succeed = false
+	fmt.Println("Preflight failed for node", n.Id, "error:", err)
+	return &printStatus{PreflightFailed, noNodeId}
+}
+
 // (do not erase) 참고 자료용
 /*func preFlight(n *Node) *printStatus {
 
