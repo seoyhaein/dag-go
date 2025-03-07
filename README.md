@@ -26,3 +26,4 @@
 - node, dag, edge, vertex 개념을 정리하자. edge 는 현재 dag 에 정의 되어 있다. 그리고, vertex 는 edge 에 있다.
 - travis 안되서 github action 으로 바꾸자.  
 - podbridge5 와 분리하자.  
+- 테스트 과정에서 디렉토리 더러워지는 현상 개선 및 자동화 방안 생각하지.  

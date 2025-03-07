@@ -36,13 +36,13 @@ func BenchmarkPreFlight(b *testing.B) {
 	}
 }
 
-func BenchmarkPreFlightCombined(b *testing.B) {
+func BenchmarkPreFlight_old_250306(b *testing.B) {
 	ctx := context.Background()
 	// 예를 들어 부모 채널이 10개인 노드, 모두 Succeed 를 보내도록 설정
 	node := setupNode("benchmark_preFlightCombined", 10, Succeed)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = preFlightCombined(ctx, node)
+		_ = preFlight_old_250306(ctx, node)
 		// 상태 초기화: preFlightCombined 내부에서 n.succeed 를 변경하기 때문에 초기 상태로 복구
 		node.succeed = false
 	}

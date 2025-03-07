@@ -272,6 +272,209 @@ func TestAddEdge(t *testing.T) {
 
 // dag.ConnectRunner() 테스트 해야 하는데 여기서 부터는 Node 먼저 테스트 해야함.
 
+// TestCopyDag 는 원본 DAG 에서 사이클 판별에 필요한 최소 정보를 복사하는 copyDagT(apiTest.go 참고) 함수의 동작을 검증
+// 이 테스트 케이를 가지고 copyDagT 와 copyDag 를 검사할 수 있음.
+func TestCopyDagT(t *testing.T) {
+	// 1. 원본 DAG 생성 및 노드/간선 구성
+	dag := NewDag()
+
+	// 노드 생성
+	nodeA := &Node{Id: "A"}
+	nodeB := &Node{Id: "B"}
+	nodeC := &Node{Id: "C"}
+	nodeD := &Node{Id: "D"}
+
+	// TODO 일단 좀더 복잡한 dag 를 만들어 보는 것도 한번 생각해보자.
+	// 부모/자식 관계 설정:
+	// A -> B, A -> C, B -> D, C -> D
+	nodeA.children = []*Node{nodeB, nodeC}
+	nodeB.parent = []*Node{nodeA}
+	nodeB.children = []*Node{nodeD}
+	nodeC.parent = []*Node{nodeA}
+	nodeC.children = []*Node{nodeD}
+	nodeD.parent = []*Node{nodeB, nodeC}
+
+	// 원본 DAG 에 노드 등록
+	dag.nodes = map[string]*Node{
+		nodeA.Id: nodeA,
+		nodeB.Id: nodeB,
+		nodeC.Id: nodeC,
+		nodeD.Id: nodeD,
+	}
+
+	// 간선 생성: A->B, A->C, B->D, C->D
+	edgeAB := &Edge{parentId: "A", childId: "B"}
+	edgeAC := &Edge{parentId: "A", childId: "C"}
+	edgeBD := &Edge{parentId: "B", childId: "D"}
+	edgeCD := &Edge{parentId: "C", childId: "D"}
+	dag.Edges = []*Edge{edgeAB, edgeAC, edgeBD, edgeCD}
+
+	// 2. copyDagT 함수 호출
+	newNodes, newEdges := copyDagT(dag)
+
+	// 3. 노드 수 검증
+	if len(newNodes) != len(dag.nodes) {
+		t.Errorf("expected %d nodes, got %d", len(dag.nodes), len(newNodes))
+	}
+
+	// 4. 각 노드의 ID와 부모/자식 관계 검증
+	for id, origNode := range dag.nodes {
+		newNode, ok := newNodes[id]
+		if !ok {
+			t.Errorf("node with id %s missing in newNodes", id)
+			continue
+		}
+		// ID 비교
+		if newNode.Id != origNode.Id {
+			t.Errorf("expected node id %s, got %s", origNode.Id, newNode.Id)
+		}
+		// 부모 수 비교 및 부모 ID 검증
+		if len(newNode.parent) != len(origNode.parent) {
+			t.Errorf("node %s: expected %d parents, got %d", id, len(origNode.parent), len(newNode.parent))
+		} else {
+			for i, p := range newNode.parent {
+				if p.Id != origNode.parent[i].Id {
+					t.Errorf("node %s: expected parent %s, got %s", id, origNode.parent[i].Id, p.Id)
+				}
+			}
+		}
+		// 자식 수 비교 및 자식 ID 검증
+		if len(newNode.children) != len(origNode.children) {
+			t.Errorf("node %s: expected %d children, got %d", id, len(origNode.children), len(newNode.children))
+		} else {
+			for i, c := range newNode.children {
+				if c.Id != origNode.children[i].Id {
+					t.Errorf("node %s: expected child %s, got %s", id, origNode.children[i].Id, c.Id)
+				}
+			}
+		}
+	}
+
+	// 5. 간선 복사 검증
+	if len(newEdges) != len(dag.Edges) {
+		t.Errorf("expected %d edges, got %d", len(dag.Edges), len(newEdges))
+	}
+	for i, origEdge := range dag.Edges {
+		newEdge := newEdges[i]
+		if newEdge.parentId != origEdge.parentId || newEdge.childId != origEdge.childId {
+			t.Errorf("edge %d: expected parent %s->child %s, got parent %s->child %s",
+				i, origEdge.parentId, origEdge.childId, newEdge.parentId, newEdge.childId)
+		}
+	}
+
+	// 6. (선택사항) 복사본이 독립적인지 검증: 복사본을 수정해도 원본이 변경되지 않아야 함.
+	newNodes["A"].Id = "ModifiedA"
+	if dag.nodes["A"].Id == "ModifiedA" {
+		t.Error("modifying newNodes should not affect original nodes")
+	}
+}
+
+// TestCopyDags tests both copyDag and copyDagT functions.
+func TestCopyDags(t *testing.T) {
+	// 1. 원본 DAG 생성 및 노드/간선 구성
+	dag := NewDag()
+
+	// 노드 생성
+	nodeA := &Node{Id: "A"}
+	nodeB := &Node{Id: "B"}
+	nodeC := &Node{Id: "C"}
+	nodeD := &Node{Id: "D"}
+
+	// 부모/자식 관계 설정:
+	// A -> B, A -> C, B -> D, C -> D
+	nodeA.children = []*Node{nodeB, nodeC}
+	nodeB.parent = []*Node{nodeA}
+	nodeB.children = []*Node{nodeD}
+	nodeC.parent = []*Node{nodeA}
+	nodeC.children = []*Node{nodeD}
+	nodeD.parent = []*Node{nodeB, nodeC}
+
+	// 원본 DAG에 노드 등록
+	dag.nodes = map[string]*Node{
+		nodeA.Id: nodeA,
+		nodeB.Id: nodeB,
+		nodeC.Id: nodeC,
+		nodeD.Id: nodeD,
+	}
+
+	// 간선 생성: A->B, A->C, B->D, C->D
+	edgeAB := &Edge{parentId: "A", childId: "B"}
+	edgeAC := &Edge{parentId: "A", childId: "C"}
+	edgeBD := &Edge{parentId: "B", childId: "D"}
+	edgeCD := &Edge{parentId: "C", childId: "D"}
+	dag.Edges = []*Edge{edgeAB, edgeAC, edgeBD, edgeCD}
+
+	// 2. 복사된 DAG 의 구조를 검증하는 헬퍼 함수 정의
+	verifyCopiedDag := func(newNodes map[string]*Node, newEdges []*Edge, methodName string) {
+		// 노드 수 검증
+		if len(newNodes) != len(dag.nodes) {
+			t.Errorf("[%s] expected %d nodes, got %d", methodName, len(dag.nodes), len(newNodes))
+		}
+
+		// 각 노드의 ID와 부모/자식 관계 검증
+		for id, origNode := range dag.nodes {
+			newNode, ok := newNodes[id]
+			if !ok {
+				t.Errorf("[%s] node with id %s missing in newNodes", methodName, id)
+				continue
+			}
+			// ID 비교
+			if newNode.Id != origNode.Id {
+				t.Errorf("[%s] expected node id %s, got %s", methodName, origNode.Id, newNode.Id)
+			}
+			// 부모 수 비교 및 부모 ID 검증
+			if len(newNode.parent) != len(origNode.parent) {
+				t.Errorf("[%s] node %s: expected %d parents, got %d", methodName, id, len(origNode.parent), len(newNode.parent))
+			} else {
+				for i, p := range newNode.parent {
+					if p.Id != origNode.parent[i].Id {
+						t.Errorf("[%s] node %s: expected parent %s, got %s", methodName, id, origNode.parent[i].Id, p.Id)
+					}
+				}
+			}
+			// 자식 수 비교 및 자식 ID 검증
+			if len(newNode.children) != len(origNode.children) {
+				t.Errorf("[%s] node %s: expected %d children, got %d", methodName, id, len(origNode.children), len(newNode.children))
+			} else {
+				for i, c := range newNode.children {
+					if c.Id != origNode.children[i].Id {
+						t.Errorf("[%s] node %s: expected child %s, got %s", methodName, id, origNode.children[i].Id, c.Id)
+					}
+				}
+			}
+		}
+
+		// 간선 복사 검증
+		if len(newEdges) != len(dag.Edges) {
+			t.Errorf("[%s] expected %d edges, got %d", methodName, len(dag.Edges), len(newEdges))
+		}
+		for i, origEdge := range dag.Edges {
+			newEdge := newEdges[i]
+			if newEdge.parentId != origEdge.parentId || newEdge.childId != origEdge.childId {
+				t.Errorf("[%s] edge %d: expected parent %s->child %s, got parent %s->child %s",
+					methodName, i, origEdge.parentId, origEdge.childId, newEdge.parentId, newEdge.childId)
+			}
+		}
+
+		// 복사본이 독립적인지 검증: 복사본을 수정해도 원본이 변경되지 않아야 함.
+		originalAId := dag.nodes["A"].Id
+		newNodes["A"].Id = "ModifiedA"
+		if dag.nodes["A"].Id == "ModifiedA" {
+			t.Errorf("[%s] modifying newNodes should not affect original nodes", methodName)
+		}
+		// 원본 노드의 ID 복원
+		dag.nodes["A"].Id = originalAId
+	}
+
+	// 3. copyDag 함수 테스트
+	newNodes1, newEdges1 := copyDag(dag)
+	verifyCopiedDag(newNodes1, newEdges1, "copyDag")
+
+	// 4. copyDagT 함수 테스트
+	newNodes2, newEdges2 := copyDagT(dag)
+	verifyCopiedDag(newNodes2, newEdges2, "copyDagT")
+}
+
 func TestSimpleDag(t *testing.T) {
 	// runnable := Connect()
 	dag, _ := InitDag()

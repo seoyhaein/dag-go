@@ -3,11 +3,11 @@ module github.com/seoyhaein/dag-go
 go 1.18
 
 require (
+	github.com/dlsniper/debugger v0.6.0
 	github.com/google/uuid v1.3.0
 	github.com/seoyhaein/podbridge v0.0.0-20220909122942-692c4f289128
 	github.com/seoyhaein/utils v0.0.0-20220911124341-b45ea45a2635
 	github.com/sirupsen/logrus v1.9.0
-	github.com/stretchr/testify v1.8.0
 	golang.org/x/sync v0.0.0-20220907140024-f12130a52804
 )
 

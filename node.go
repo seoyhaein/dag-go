@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"golang.org/x/sync/errgroup"
+	"strconv"
 	"strings"
 	// (do not erase) goroutine 디버깅용
-	//"github.com/dlsniper/debugger"
+	"github.com/dlsniper/debugger"
 )
 
 type Node struct {
@@ -45,84 +46,9 @@ type Node struct {
 func preFlight(ctx context.Context, n *Node) *printStatus {
 	if n == nil {
 		panic(fmt.Errorf("node is nil"))
-		// (do not erase) 안정화 버전 나올때는 panic 을 리턴으로 처리
-		//return &printStatus{PreflightFailed, noNodeId}
-	}
-	// (do not erase) goroutine 디버깅용
-	/*debugger.SetLabels(func() []string {
-		return []string{
-			"preFlight: nodeId", n.Id,
-		}
-	})*/
-
-	// 성공하면 context 사용한다.
-	eg, _ := errgroup.WithContext(ctx)
-	i := len(n.parentVertex) // 부모 채널의 수
-	for j := 0; j < i; j++ {
-		// (do not erase) 중요!! 여기서 들어갈 변수를 세팅않해주면 에러남.
-		k := j
-		c := n.parentVertex[k]
-		eg.Go(func() error {
-			result := <-c
-			if result == Failed {
-				fmt.Println("failed", n.Id)
-				return fmt.Errorf("failed")
-			}
-			return nil
-		})
-	}
-	if err := eg.Wait(); err == nil { // 대기
-		n.succeed = true
-		fmt.Println("Preflight", n.Id)
-		return &printStatus{Preflight, n.Id}
-	}
-	n.succeed = false
-	fmt.Println("PreflightFailed", n.Id)
-	return &printStatus{PreflightFailed, noNodeId}
-}
-
-func preFlightT(ctx context.Context, n *Node) *printStatus {
-	if n == nil {
-		panic(fmt.Errorf("node is nil"))
-		// (do not erase) 안정화 버전 나올때는 panic 을 리턴으로 처리
-		//return &printStatus{PreflightFailed, noNodeId}
-	}
-	// 성공하면 context 사용한다.
-	eg, _ := errgroup.WithContext(ctx)
-	i := len(n.parentVertex) // 부모 채널의 수
-	var try bool
-	for j := 0; j < i; j++ {
-		// (do not erase) 중요!! 여기서 들어갈 변수를 세팅않해주면 에러남.
-		k := j
-		c := n.parentVertex[k]
-		try = eg.TryGo(func() error {
-			result := <-c
-			if result == Failed {
-				return fmt.Errorf("failed")
-			}
-			return nil
-		})
-		if !try {
-			break
-		}
-	}
-	if try {
-		if err := eg.Wait(); err == nil { // 대기
-			n.succeed = true
-			return &printStatus{Preflight, n.Id}
-		}
 	}
 
-	n.succeed = false
-	return &printStatus{PreflightFailed, noNodeId}
-}
-
-func preFlightCombined(ctx context.Context, n *Node) *printStatus {
-	if n == nil {
-		panic(fmt.Errorf("node is nil"))
-	}
-
-	// errgroup 와 새로운 컨텍스트 생성
+	// errgroup 과 새로운 컨텍스트 생성
 	eg, ctx := errgroup.WithContext(ctx)
 	i := len(n.parentVertex)
 	var try bool = true
@@ -130,8 +56,14 @@ func preFlightCombined(ctx context.Context, n *Node) *printStatus {
 	for j := 0; j < i; j++ {
 		k := j // closure 캡처 문제 해결
 		c := n.parentVertex[k]
-		// TryGo를 사용하여 고루틴을 실행
 		try = eg.TryGo(func() error {
+			// 각 고루틴에 디버깅 라벨 설정
+			debugger.SetLabels(func() []string {
+				return []string{
+					"preFlight: nodeId", n.Id,
+					"channelIndex", strconv.Itoa(k),
+				}
+			})
 			select {
 			case result := <-c:
 				if result == Failed {
@@ -143,13 +75,12 @@ func preFlightCombined(ctx context.Context, n *Node) *printStatus {
 				return ctx.Err()
 			}
 		})
-		// 만약 TryGo가 false 를 반환했다면, 더 이상 고루틴 실행을 시도하지 않음
 		if !try {
 			break
 		}
 	}
 
-	// 모든 고루틴이 종료될 때까지 기다림
+	// 모든 고루틴이 종료될 때까지 대기
 	err := eg.Wait()
 	if err == nil && try {
 		n.succeed = true
@@ -188,37 +119,27 @@ func preFlightCombined(ctx context.Context, n *Node) *printStatus {
 func inFlight(n *Node) *printStatus {
 	if n == nil {
 		panic(fmt.Errorf("node is nil"))
-		// (do not erase) 안정화 버전 나올때는 panic 을 리턴으로 처리
-		//return &printStatus{InFlightFailed, noNodeId}
 	}
-	// (do not erase) goroutine 디버깅용
-	/*debugger.SetLabels(func() []string {
-		return []string{
-			"inFlight: nodeId", n.Id,
-		}
-	})*/
 
+	// 시작 노드와 종료 노드는 실행 없이 succeed 를 true 로 설정
 	if n.Id == StartNode || n.Id == EndNode {
 		n.succeed = true
-	} else {
-		// 성골할때만 명령을 실행시키고, 실패할경우는 채널에 값만 흘려 보낸다.
-		// TODO 리턴 코드 작성하자.
-		if n.succeed {
-			_, err := n.Execute()
-			if err != nil {
-				n.succeed = false
-			} else {
-				n.succeed = true
-			}
+	} else if n.succeed { // 기존에 succeed 가 true 일 때만 실행 진행
+		// TODO Execute 재정의 하거나 새롭게 구현할때 참고해야 함.
+		if _, err := n.Execute(); err != nil {
+			n.succeed = false
 		}
+		// else: n.succeed remains true
 	}
+
+	// 결과에 따라 메시지를 출력하고 printStatus 를 반환
 	if n.succeed {
 		fmt.Println("InFlight", n.Id)
 		return &printStatus{InFlight, n.Id}
-	} else {
-		fmt.Println("InFlightFailed", n.Id)
-		return &printStatus{InFlightFailed, n.Id}
 	}
+
+	fmt.Println("InFlightFailed", n.Id)
+	return &printStatus{InFlightFailed, n.Id}
 }
 
 // postFlight preFlight, inFlight, postFlight 에서의 node 는 같은 노드이다.
@@ -226,33 +147,29 @@ func inFlight(n *Node) *printStatus {
 func postFlight(n *Node) *printStatus {
 	if n == nil {
 		panic(fmt.Errorf("node is nil"))
-		//return &printStatus{PostFlightFailed, noNodeId}
+		// 안정화 버전에서는 panic 대신 적절한 오류 처리를 할 수 있음
 	}
-	// (do not erase) goroutine 디버깅용
-	/*debugger.SetLabels(func() []string {
-		return []string{
-			"postFlight: nodeId", n.Id,
-		}
-	})*/
+
+	// 종료 노드(EndNode)인 경우 별도로 처리
 	if n.Id == EndNode {
 		fmt.Println("FlightEnd", n.Id)
 		return &printStatus{FlightEnd, n.Id}
 	}
 
-	k := len(n.childrenVertex)
+	// n.succeed 값에 따라 보낼 결과를 결정
+	var result runningStatus
 	if n.succeed {
-		for j := 0; j < k; j++ {
-			c := n.childrenVertex[j]
-			c <- Succeed
-			close(c)
-		}
+		result = Succeed
 	} else {
-		for j := 0; j < k; j++ {
-			c := n.childrenVertex[j]
-			c <- Failed
-			close(c)
-		}
+		result = Failed
 	}
+
+	// 모든 자식 채널에 result 값을 보내고, 채널을 닫음
+	for _, c := range n.childrenVertex {
+		c <- result
+		close(c)
+	}
+
 	fmt.Println("PostFlight", n.Id)
 	return &printStatus{PostFlight, n.Id}
 }

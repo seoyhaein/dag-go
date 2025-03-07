@@ -13,9 +13,9 @@ rm -f preflight.txt preflight_combined.txt benchstat.txt
 echo "Running BenchmarkPreFlight..."
 go test -bench=BenchmarkPreFlight -run=^$ -benchmem ./... > preflight.txt
 
-# BenchmarkPreFlightCombined 실행 및 결과 저장, 벤치마크만 실행하도록 -run=^$ 옵션 추가
-echo "Running BenchmarkPreFlightCombined..."
-go test -bench=BenchmarkPreFlightCombined -run=^$ -benchmem ./... > preflight_combined.txt
+# BenchmarkPreFlight_old_250306 실행 및 결과 저장, 벤치마크만 실행하도록 -run=^$ 옵션 추가
+echo "Running BenchmarkPreFlight_old_250306..."
+go test -bench=BenchmarkPreFlight_old_250306 -run=^$ -benchmem ./... > preflight_combined.txt
 
 # 두 결과 파일 비교
 # TODO 일단 확인해보자.

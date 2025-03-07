@@ -87,7 +87,7 @@ func TestPreFlightT_AllSucceed(t *testing.T) {
 	ch2 <- Succeed
 	node.parentVertex = []chan runningStatus{ch1, ch2}
 
-	ps := preFlightT(ctx, node)
+	ps := preFlight(ctx, node)
 	if ps.rStatus != Preflight {
 		t.Errorf("Expected status %v, got %v", Preflight, ps.rStatus)
 	}
@@ -110,7 +110,7 @@ func TestPreFlightT_OneFailed(t *testing.T) {
 	ch2 <- Failed
 	node.parentVertex = []chan runningStatus{ch1, ch2}
 
-	ps := preFlightT(ctx, node)
+	ps := preFlight(ctx, node)
 	if ps.rStatus != PreflightFailed {
 		t.Errorf("Expected status %v, got %v", PreflightFailed, ps.rStatus)
 	}
@@ -143,7 +143,6 @@ func TestPreFlight_NoParents(t *testing.T) {
 }
 
 // TestPreFlight_ContextCancelled tests preFlight when the context is cancelled.
-// 주의: 현재 preFlight 함수는 ctx.Done()를 감시하지 않으므로, 이 테스트는 타임아웃에 걸려 실패할 수 있다.
 func TestPreFlight_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	node := &Node{Id: "node6"}
