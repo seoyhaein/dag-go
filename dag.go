@@ -3,12 +3,20 @@ package dag_go
 import (
 	"context"
 	"fmt"
-	"time"
-
 	"github.com/google/uuid"
 	"github.com/seoyhaein/utils"
 	"golang.org/x/sync/errgroup"
+	"math/rand"
+	"strings"
+	"time"
 )
+
+// rand 의 경우,
+// rand/v2 가 있음. golang.org/x/exp/rand
+// Go 팀의 실험적 확장 패키지로, 보다 다양한 PRNG 알고리즘(예: PCG, XorShift 등)과 추가 기능을 제공합
+// 성능이나 난수 품질 면에서 더 나은 옵션을 제공할 수 있지만, 아직 실험적이므로 API 가 변경될 수 있음
+// 새로운 기능을 활용하고 싶거나, 특정 알고리즘이 필요한 경우 고려할 수 있음
+// 안정성과 호환성이 중요하다면 math/rand 를 사용하는 것이 좋고, 추가 기능이나 개선된 성능이 필요하다면 rand/v2(또는 golang.org/x/exp/rand)를 검토할 수 있음
 
 type (
 	runningStatus int
@@ -880,87 +888,87 @@ func (dag *Dag) AddNodeToStartNode(to *Node) error {
 	return nil
 }
 
-// copyDag dag 를 복사함.
+// copyDag dag 를 복사함. 필요한것만 복사함.
 func copyDag(original *Dag) (map[string]*Node, []*Edge) {
-	num := len(original.nodes)
-	if num < 1 {
+	// 원본에 노드가 없으면 nil 반환
+	if len(original.nodes) == 0 {
 		return nil, nil
 	}
-	var nodes map[string]*Node
-	nodes = make(map[string]*Node, len(original.nodes))
 
-	// 1. 먼저 모든 노드들을 복사한다. (노드자체 가존재하지 않을 수 있으므로 부모 자식 아직 추가 않해줌.)
-	// TODO 아래 shallow copy 가 이루어지는 부분이 있는데, 이것까지 copy 해야할 지 생각해야함.
+	// 1. 노드의 기본 정보(ID)만 복사한 새 맵 생성
+	newNodes := make(map[string]*Node, len(original.nodes))
 	for _, n := range original.nodes {
-		node := new(Node)
-		node.Id = n.Id
-		node.ImageName = n.ImageName
-		node.RunCommand = n.RunCommand
-		node.Commands = n.Commands
-		node.succeed = n.succeed
+		// 필요한 최소한의 정보만 복사
+		newNode := &Node{
+			Id: n.Id,
+			// 기타 필드는 cycle 검증에 필요하지 않으므로 생략
+		}
+		newNodes[newNode.Id] = newNode
+	}
 
-		nodes[node.Id] = node
-	}
-	// 2. 부모 자식 노드들을 추가해줌.
+	// 2. 원본 노드의 부모/자식 관계를 이용하여 새 노드들의 포인터 연결
 	for _, n := range original.nodes {
-		p := len(n.parent)
-		ch := len(n.children)
-		// 부모노드들을 추가한다.
-		for i := 0; i < p; i++ {
-			nodes[n.Id].parent = append(nodes[n.Id].parent, nodes[n.parent[i].Id])
-		}
-		// 자식 노드들을 추가한다.
-		for i := 0; i < ch; i++ {
-			nodes[n.Id].children = append(nodes[n.Id].children, nodes[n.children[i].Id])
-		}
-	}
-	// 3. Vertex(channel) 을 복사한다.
-	edges := CopyEdge(original.Edges)
-	num = len(edges)
-	if num > 0 {
-		for _, node := range nodes {
-			es := findEdgeFromParentId(edges, node.Id)
-			for _, e := range es {
-				node.childrenVertex = append(node.childrenVertex, e.vertex)
+		newNode := newNodes[n.Id]
+		// 부모 노드 연결
+		for _, parent := range n.parent {
+			if copiedParent, ok := newNodes[parent.Id]; ok {
+				newNode.parent = append(newNode.parent, copiedParent)
 			}
-			es = findEdgeFromChildId(edges, node.Id)
-			for _, e := range es {
-				node.parentVertex = append(node.parentVertex, e.vertex)
+		}
+		// 자식 노드 연결
+		for _, child := range n.children {
+			if copiedChild, ok := newNodes[child.Id]; ok {
+				newNode.children = append(newNode.children, copiedChild)
 			}
 		}
 	}
 
-	// 4. xml 을 위해 from, to 복사 해준다. (추후 없어질 수 있음.)
-	for _, n := range original.nodes {
-		for _, id := range n.from {
-			nodes[n.Id].from = append(nodes[n.Id].from, id)
-		}
-
-		for _, id := range n.to {
-			nodes[n.Id].to = append(nodes[n.Id].to, id)
+	// 3. 간선(Edge) 복사: detectCycle 에 필요하다면 parentId와 childId만 복사
+	newEdges := make([]*Edge, len(original.Edges))
+	for i, e := range original.Edges {
+		newEdges[i] = &Edge{
+			parentId: e.parentId,
+			childId:  e.childId,
+			// vertex 등 기타 정보는 cycle 검증에 필요하지 않으므로 생략
 		}
 	}
-	return nodes, edges
+
+	return newNodes, newEdges
 }
 
 // CopyDag dag 를 복사함.
-func CopyDag(original *Dag, Id string) (copied *Dag) {
+func CopyDag(original *Dag, newId string) *Dag {
+	// 원본이 nil 이면 nil 반환
 	if original == nil {
 		return nil
 	}
-	copied = &Dag{}
-
-	if utils.IsEmptyString(original.Pid) == false {
-		copied.Pid = original.Pid
-	}
-	if utils.IsEmptyString(Id) {
+	// newId가 빈 문자열이면 nil 반환
+	if utils.IsEmptyString(newId) {
 		return nil
 	}
-	copied.Id = Id
+
+	// 새 DAG 인스턴스 생성 및 기본 필드 복사
+	copied := &Dag{
+		Id:            newId,
+		Timeout:       original.Timeout,
+		bTimeout:      original.bTimeout,
+		ContainerCmd:  original.ContainerCmd,
+		validated:     original.validated,
+		RunningStatus: make(chan *printStatus, Max),
+	}
+
+	// 원본의 Pid 가 비어있지 않다면 복사
+	if !utils.IsEmptyString(original.Pid) {
+		copied.Pid = original.Pid
+	}
+
+	// 노드와 간선 복사는 copyDag 함수로 수행 (shallow copy 의도 유지)
 	ns, edges := copyDag(original)
 	copied.nodes = ns
 	copied.Edges = edges
 
+	// 복사된 노드들의 parentDag 필드를 새 DAG 로 재설정하고,
+	// StartNode, EndNode 를 찾아서 할당
 	for _, n := range ns {
 		n.parentDag = copied
 		if n.Id == StartNode {
@@ -970,15 +978,8 @@ func CopyDag(original *Dag, Id string) (copied *Dag) {
 			copied.EndNode = n
 		}
 	}
-	copied.validated = original.validated
-	copied.RunningStatus = make(chan *printStatus, Max)
-	//TODO 생략 추후 넣어줌
-	// 에러를 모으는 용도.
-	//errLogs []*systemError
-	copied.Timeout = original.Timeout
-	copied.bTimeout = original.bTimeout
-	copied.ContainerCmd = original.ContainerCmd
-	return
+
+	return copied
 }
 
 func CopyEdge(original []*Edge) []*Edge {
@@ -1105,4 +1106,99 @@ func printRunningStatus(status *printStatus) {
 
 	fmt.Printf("nodeId:%s, status:%s\n", status.nodeId, r)
 
+}
+
+// for test
+
+// generateDAG 는 numNodes 개의 노드를 생성하고,
+// i < j 인 경우 확률 edgeProb 로 부모-자식 간선을 추가하여 DAG 를 구성
+func generateDAG(numNodes int, edgeProb float64) *Dag {
+	// 새로운 DAG 생성 (NewDag 는 초기화된 Dag 를 반환한다고 가정)
+	dag := NewDag()
+	dag.nodes = make(map[string]*Node, numNodes)
+
+	// 노드 생성: "0", "1", ..., "numNodes-1" 의 ID 사용
+	for i := 0; i < numNodes; i++ {
+		id := fmt.Sprintf("%d", i)
+		node := &Node{Id: id}
+		dag.nodes[id] = node
+	}
+
+	// 간선 생성: i < j 인 경우, edgeProb 확률로 A -> B 간선 추가
+	for i := 0; i < numNodes; i++ {
+		for j := i + 1; j < numNodes; j++ {
+			if rand.Float64() < edgeProb {
+				parentID := fmt.Sprintf("%d", i)
+				childID := fmt.Sprintf("%d", j)
+				edge := &Edge{parentId: parentID, childId: childID}
+				dag.Edges = append(dag.Edges, edge)
+				// 부모 노드의 자식 리스트에 추가
+				dag.nodes[parentID].children = append(dag.nodes[parentID].children, dag.nodes[childID])
+				// 자식 노드의 부모 리스트에 추가
+				dag.nodes[childID].parent = append(dag.nodes[childID].parent, dag.nodes[parentID])
+			}
+		}
+	}
+	return dag
+}
+
+// verifyCopiedDag 는 원본 DAG 와 복사된 노드 맵 및 간선 슬라이스가 동일한 구조를 갖는지 검증
+// 문제가 있으면 에러 메시지를 모아 하나의 error 로 반환하고, 문제가 없으면 nil 을 반환
+func verifyCopiedDag(original *Dag, newNodes map[string]*Node, newEdges []*Edge, methodName string) error {
+	var errs []string
+
+	// (1) 노드 수 검증
+	if len(newNodes) != len(original.nodes) {
+		errs = append(errs, fmt.Sprintf("[%s] expected %d nodes, got %d", methodName, len(original.nodes), len(newNodes)))
+	}
+
+	// (2) 각 노드의 ID, 부모/자식 관계 검증
+	for id, origNode := range original.nodes {
+		newNode, ok := newNodes[id]
+		if !ok {
+			errs = append(errs, fmt.Sprintf("[%s] node with id %s missing in newNodes", methodName, id))
+			continue
+		}
+		// ID 비교
+		if newNode.Id != origNode.Id {
+			errs = append(errs, fmt.Sprintf("[%s] expected node id %s, got %s", methodName, origNode.Id, newNode.Id))
+		}
+		// 부모 관계 검증
+		if len(newNode.parent) != len(origNode.parent) {
+			errs = append(errs, fmt.Sprintf("[%s] node %s: expected %d parents, got %d", methodName, id, len(origNode.parent), len(newNode.parent)))
+		} else {
+			for i, p := range newNode.parent {
+				if p.Id != origNode.parent[i].Id {
+					errs = append(errs, fmt.Sprintf("[%s] node %s: expected parent %s, got %s", methodName, id, origNode.parent[i].Id, p.Id))
+				}
+			}
+		}
+		// 자식 관계 검증
+		if len(newNode.children) != len(origNode.children) {
+			errs = append(errs, fmt.Sprintf("[%s] node %s: expected %d children, got %d", methodName, id, len(origNode.children), len(newNode.children)))
+		} else {
+			for i, c := range newNode.children {
+				if c.Id != origNode.children[i].Id {
+					errs = append(errs, fmt.Sprintf("[%s] node %s: expected child %s, got %s", methodName, id, origNode.children[i].Id, c.Id))
+				}
+			}
+		}
+	}
+
+	// (3) 간선 검증
+	if len(newEdges) != len(original.Edges) {
+		errs = append(errs, fmt.Sprintf("[%s] expected %d edges, got %d", methodName, len(original.Edges), len(newEdges)))
+	}
+	for i, origEdge := range original.Edges {
+		newEdge := newEdges[i]
+		if newEdge.parentId != origEdge.parentId || newEdge.childId != origEdge.childId {
+			errs = append(errs, fmt.Sprintf("[%s] edge %d: expected parent %s->child %s, got parent %s->child %s",
+				methodName, i, origEdge.parentId, origEdge.childId, newEdge.parentId, newEdge.childId))
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf(strings.Join(errs, "\n"))
+	}
+	return nil
 }

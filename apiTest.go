@@ -90,6 +90,68 @@ func preFlight_old_250305(ctx context.Context, n *Node) *printStatus {
 	return &printStatus{PreflightFailed, noNodeId}
 }
 
+func copyDag_old_250307(original *Dag) (map[string]*Node, []*Edge) {
+	num := len(original.nodes)
+	if num < 1 {
+		return nil, nil
+	}
+	var nodes map[string]*Node
+	nodes = make(map[string]*Node, len(original.nodes))
+
+	// 1. 먼저 모든 노드들을 복사한다. (노드자체 가존재하지 않을 수 있으므로 부모 자식 아직 추가 않해줌.)
+	// TODO 아래 shallow copy 가 이루어지는 부분이 있는데, 이것까지 copy 해야할 지 생각해야함.
+	for _, n := range original.nodes {
+		node := new(Node)
+		node.Id = n.Id
+		node.ImageName = n.ImageName
+		node.RunCommand = n.RunCommand
+		node.Commands = n.Commands
+		node.succeed = n.succeed
+
+		nodes[node.Id] = node
+	}
+	// 2. 부모 자식 노드들을 추가해줌.
+	for _, n := range original.nodes {
+		p := len(n.parent)
+		ch := len(n.children)
+		// 부모노드들을 추가한다.
+		for i := 0; i < p; i++ {
+			nodes[n.Id].parent = append(nodes[n.Id].parent, nodes[n.parent[i].Id])
+		}
+		// 자식 노드들을 추가한다.
+		for i := 0; i < ch; i++ {
+			nodes[n.Id].children = append(nodes[n.Id].children, nodes[n.children[i].Id])
+		}
+	}
+	// 3. Vertex(channel) 을 복사한다.
+	edges := CopyEdge(original.Edges)
+	num = len(edges)
+	if num > 0 {
+		for _, node := range nodes {
+			es := findEdgeFromParentId(edges, node.Id)
+			for _, e := range es {
+				node.childrenVertex = append(node.childrenVertex, e.vertex)
+			}
+			es = findEdgeFromChildId(edges, node.Id)
+			for _, e := range es {
+				node.parentVertex = append(node.parentVertex, e.vertex)
+			}
+		}
+	}
+
+	// 4. xml 을 위해 from, to 복사 해준다. (추후 없어질 수 있음.)
+	for _, n := range original.nodes {
+		for _, id := range n.from {
+			nodes[n.Id].from = append(nodes[n.Id].from, id)
+		}
+
+		for _, id := range n.to {
+			nodes[n.Id].to = append(nodes[n.Id].to, id)
+		}
+	}
+	return nodes, edges
+}
+
 func copyDagT(original *Dag) (map[string]*Node, []*Edge) {
 	// 원본에 노드가 없으면 nil 반환
 	if len(original.nodes) == 0 {

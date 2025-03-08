@@ -152,4 +152,42 @@ func preFlightT(ctx context.Context, n *Node) *printStatus {
 	n.succeed = false
 	return &printStatus{PreflightFailed, noNodeId}
 }
+
+// CopyDag dag 를 복사함.
+func CopyDag(original *Dag, Id string) (copied *Dag) {
+	if original == nil {
+		return nil
+	}
+	copied = &Dag{}
+
+	if utils.IsEmptyString(original.Pid) == false {
+		copied.Pid = original.Pid
+	}
+	if utils.IsEmptyString(Id) {
+		return nil
+	}
+	copied.Id = Id
+	ns, edges := copyDag(original)
+	copied.nodes = ns
+	copied.Edges = edges
+
+	for _, n := range ns {
+		n.parentDag = copied
+		if n.Id == StartNode {
+			copied.StartNode = n
+		}
+		if n.Id == EndNode {
+			copied.EndNode = n
+		}
+	}
+	copied.validated = original.validated
+	copied.RunningStatus = make(chan *printStatus, Max)
+	//TODO 생략 추후 넣어줌
+	// 에러를 모으는 용도.
+	//errLogs []*systemError
+	copied.Timeout = original.Timeout
+	copied.bTimeout = original.bTimeout
+	copied.ContainerCmd = original.ContainerCmd
+	return
+}
 ```

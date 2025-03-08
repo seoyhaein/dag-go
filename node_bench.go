@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+// 웜업 표준 만들자. 일단 모두 하는 걸로, 성능의 차이는 크게 없으므로.
+
 // setupNode 는 테스트를 위한 Node 와 parentVertex 채널들을 설정
 func setupNode(id string, numParents int, value runningStatus) *Node {
 	node := &Node{Id: id}
@@ -28,11 +30,17 @@ func BenchmarkPreFlight(b *testing.B) {
 	ctx := context.Background()
 	// 예를 들어 부모 채널이 10개인 노드, 모두 Succeed 를 보내도록 설정
 	node := setupNode("benchmark_preFlight", 10, Succeed)
+
+	// Warm-up: 벤치마크 루프 전에 한 번 실행
+	_ = preFlight(ctx, node)
+
+	b.ReportAllocs()
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = preFlight(ctx, node)
 		// 벤치마크를 반복 실행할 때, 상태를 초기화해야 할 수도 있음
-		node.succeed = false
+		// node.succeed = false
 	}
 }
 
@@ -40,10 +48,15 @@ func BenchmarkPreFlight_old_250306(b *testing.B) {
 	ctx := context.Background()
 	// 예를 들어 부모 채널이 10개인 노드, 모두 Succeed 를 보내도록 설정
 	node := setupNode("benchmark_preFlightCombined", 10, Succeed)
+
+	// Warm-up 실행
+	_ = preFlight_old_250306(ctx, node)
+
+	b.ReportAllocs()
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = preFlight_old_250306(ctx, node)
-		// 상태 초기화: preFlightCombined 내부에서 n.succeed 를 변경하기 때문에 초기 상태로 복구
-		node.succeed = false
+		// node.succeed = false
 	}
 }
