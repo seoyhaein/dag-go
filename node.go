@@ -157,6 +157,36 @@ func postFlight(n *Node) *printStatus {
 	return &printStatus{PostFlight, n.Id}
 }
 
+func createNode(id string, r Runnable) *Node {
+	return &Node{
+		Id:         id,
+		RunCommand: r,
+	}
+}
+
+func createNodeWithId(id string) *Node {
+	return &Node{
+		Id: id,
+	}
+}
+
+// Execute 이것을 작성하면 된다.
+// TODO 7 은 FlightEnd 인지 확인하자. 상수들에 대해서 정리하자.
+func (n *Node) Execute() (r int, err error) {
+	if n.RunCommand != nil {
+		r, err = execute(n)
+		return
+	}
+	// Container 를 사용하 지않는 다른 명령어를 넣을 경우 여기서 작성하면 된다.
+	return 7, nil
+}
+
+// execute add by seoy
+func execute(this *Node) (int, error) {
+	r, err := this.RunCommand.RunE(this)
+	return r, err
+}
+
 func checkVisit(visit map[string]bool) bool {
 	for _, v := range visit {
 		if v == false {
@@ -194,33 +224,4 @@ func getNextNode(n *Node) *Node {
 	n.children = append(n.children[:0], n.children[1:]...)
 
 	return ch
-}
-
-func createNode(id string, r Runnable) *Node {
-	return &Node{
-		Id:         id,
-		RunCommand: r,
-	}
-}
-
-func createNodeWithId(id string) *Node {
-	return &Node{
-		Id: id,
-	}
-}
-
-// Execute 이것을 작성하면 된다.
-func (n *Node) Execute() (r int, err error) {
-	if n.RunCommand != nil {
-		r, err = execute(n)
-		return
-	}
-	// Container 를 사용하 지않는 다른 명령어를 넣을 경우 여기서 작성하면 된다.
-	return 7, nil
-}
-
-// execute add by seoy
-func execute(this *Node) (int, error) {
-	r, err := this.RunCommand.RunE(this)
-	return r, err
 }
