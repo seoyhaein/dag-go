@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/seoyhaein/utils"
-	"golang.org/x/sync/errgroup"
 	"math/rand"
 	"strings"
 	"time"
@@ -85,7 +84,7 @@ type Dag struct {
 	StartNode *Node
 	EndNode   *Node
 	validated bool
-
+	// TODO 생각해보기 wait 및 몇가지 부가적인 메서드들에 대해서. (중요) 필요한가 싶다. 일단 조심스럽게 접근하자.
 	RunningStatus chan *printStatus
 	runningStatus []chan *printStatus
 
@@ -369,149 +368,48 @@ func (dag *Dag) visitReset() map[string]bool {
 	return visited
 }
 
-// cycle 이면 true, cycle 이 아니면 false
-// 이상태서 리턴 중복되는 것과 recursive 확인하자.
-// 첫번째 bool 은 circle 인지, 두번째 bool 은 다 돌았는지
-// BUG(seoy): 이상 현상 발생
-// detectCycle runningStatus 과 start, restart, pause, stop 등 추가 후 버그 개선
-func (dag *Dag) detectCycle(startNodeId string, endNodeId string, visit map[string]bool) (bool, bool) {
-	// 복사 할때 원본이 복사가 되는지 확인해서
-	// getLefMostNode 할때 지워지는지 확인해야한다.
-	var (
-		nextNode    *Node // 자식 노 추후 이름 바꿈.
-		currentNode *Node // current node 추후 이름 바꿈.
-		curId       string
-		cycle       bool // 서클인지 확인, circle 이면 true
-		end         bool // 다 순회했는지 확인, 다 순회하면 true
-	)
-	// TODO dag.nodes nil check 해야함.
-	ns, check := cloneGraph(dag.nodes)
-	// cycle 이면 true, cycle 이 아니면 false
-	if check {
-		return true, false
+// detectCycleDFS 는 DFS 를 통해 사이클이 있는지 탐지
+// visited: 이미 방문한 노드를 기록
+// recStack: 현재 재귀 호출 경로(스택)에 있는 노드들을 추적
+// true 이면 cycle
+func detectCycleDFS(node *Node, visited, recStack map[string]bool) bool {
+	if recStack[node.Id] {
+		return true
 	}
+	if visited[node.Id] {
+		return false
+	}
+	visited[node.Id] = true
+	recStack[node.Id] = true
 
-	curId = endNodeId
-
-	cycle = false
-	end = false
-
-	// visit 이 모두 true 인데 이동할 자식이 있는 경우는 circle 이다.
-	if checkVisit(visit) {
-		// 즉, getLefMostNode 에서는 지워지는데 ns 를 지운다. 그리고 모두 방문했는데 자식노드가 있다면 그것은 cycle 이다.
-		n := getNode(endNodeId, dag.nodes)
-		if len(n.children) > 0 {
-			return true, end // circle, end
+	for _, child := range node.children {
+		if detectCycleDFS(child, visited, recStack) {
+			return true
 		}
 	}
 
-	// 그외의 조건들일 경우 방문처리를 진행함.
-	// 여기서 오해하지 말아야 할 경우는 detectCycle 는 recursive func 임.
-	// 처음 초기 설정 값은 start_node_id 와 end_node_id 가 start_node_id 로 설정될 것임.
-	visit[endNodeId] = true
-
-	// DFS(깊이우선 방식으로 graph 를 순회함.
-	currentNode = getNode(endNodeId, ns)
-
-	if currentNode != nil {
-		nextNode = getNextNode(currentNode)
-
-		if nextNode != nil {
-			endNodeId = nextNode.Id
-		}
-	}
-
-	for nextNode != nil {
-		cycle, end = dag.detectCycle(startNodeId, endNodeId, visit) // 파라미터의 temp1 는 부모를 넣저.
-		fmt.Println(ns[curId].Id)                                   // TODO 이거 주석 처리했다고 리턴값이 달라짐.
-
-		end = checkVisit(visit)
-
-		if end {
-			return cycle, end
-		}
-
-		// cycle 이면 리턴
-		if cycle {
-			return cycle, end
-		}
-
-		// 여기서 부모 노드이다.
-		parentNode := getNode(curId, ns)
-		if parentNode != nil {
-			nextNode = getNextNode(parentNode)
-			if nextNode != nil {
-				endNodeId = nextNode.Id
-				end = false
-			}
-			end = true
-			nextNode = nil
-		}
-	}
-	return cycle, end
+	recStack[node.Id] = false
+	return false
 }
 
-// gpt 수정 버전본.
-func (dag *Dag) detectCycleT(startNodeId string, endNodeId string, visit map[string]bool) (bool, bool) {
-	var (
-		nextNode    *Node // The next node to visit
-		currentNode *Node // The current node being visited
-		curId       string
-		cycle       bool // True if a cycle is detected
-		end         bool // True if the entire graph has been traversed
-	)
+// DetectCycle 는 주어진 DAG 에 사이클이 존재하는지 검사
+// copyDag 를 사용하여 원본 DAG 의 최소 정보(노드의 ID와 부모/자식 관계)만 복사한 뒤, DFS 로 사이클을 탐지
+// true 이면 cycle
+func DetectCycle(dag *Dag) bool {
+	// copyDag 는 최소 정보만 복사하므로, 사이클 검사에 적합
+	newNodes, _ := copyDag(dag)
+	visited := make(map[string]bool)
+	recStack := make(map[string]bool)
 
-	// Clone the graph and check for a cycle.
-	ns, check := cloneGraph(dag.nodes)
-	if check {
-		return true, false // A cycle was detected during cloning
-	}
-
-	curId = endNodeId
-	cycle = false
-	end = false
-
-	// If all nodes are visited, but there are still children left to visit, then it is a cycle.
-	if checkVisit(visit) {
-		n := getNode(endNodeId, dag.nodes)
-		if len(n.children) > 0 {
-			return true, end // It's a cycle
-		}
-	}
-
-	// Mark the current node as visited.
-	visit[endNodeId] = true
-
-	// Perform a Depth First Search (DFS).
-	currentNode = getNode(endNodeId, ns)
-	if currentNode != nil {
-		nextNode = getNextNode(currentNode)
-		if nextNode != nil {
-			endNodeId = nextNode.Id
-		}
-	}
-
-	for nextNode != nil {
-		// Recursive call to detect cycles.
-		cycle, end = dag.detectCycle(startNodeId, endNodeId, visit)
-		if end || cycle {
-			return cycle, end // If a cycle is detected or all nodes are visited, exit the loop.
-		}
-
-		// Move to the next node.
-		parentNode := getNode(curId, ns)
-		if parentNode != nil {
-			nextNode = getNextNode(parentNode)
-			if nextNode != nil {
-				endNodeId = nextNode.Id
-				end = false
+	// 새로 복사된 노드들을 대상으로 DFS 를 수행
+	for _, node := range newNodes {
+		if !visited[node.Id] {
+			if detectCycleDFS(node, visited, recStack) {
+				return true
 			}
-			end = true
-			nextNode = nil
 		}
 	}
-
-	return cycle, end
+	return false
 }
 
 func (dag *Dag) ConnectRunner() bool {
@@ -525,64 +423,12 @@ func (dag *Dag) ConnectRunner() bool {
 	return true
 }
 
-// Debug 목적으로 스택? 두개 만들어서 채널에서 보내는 값과, 받는  값각각 넣어서 비교해본다.
-// (do not erase) close 해주는 것 : func (dag *Dag) Wait(ctx context.Context) bool  에서 defer close(dag.RunningStatus) 해줌
-// (do not erase) 너무 중요.@@@@ 채널 close 방식 확인하자. https://go101.org/article/channel-closing.html 너무 좋은 자료. 왜 제목을 101 이라고 했지 중급이상인데.
-// setFunc commit by seoy
-// https://stackoverflow.com/questions/15715605/multiple-goroutines-listening-on-one-channel
-// https://go.dev/ref/mem#tmp_7 읽자.
-// https://umi0410.github.io/blog/golang/go-mutex-semaphore/
-
-// CreateImageT 이건 컨테이너 전용- 이미지 생성할때 고루틴 돌리니 에러 발생..
-// TODO check ContainerCmd
-func (dag *Dag) CreateImageT(ctx context.Context, healthChecker string) {
-
-	if dag.ContainerCmd == nil {
-		panic("ContainerCmd is not set")
-	}
-
-	eg, _ := errgroup.WithContext(ctx)
-
-	for _, v := range dag.nodes {
-		eg.Go(func() error {
-			err := dag.ContainerCmd.CreateImage(v, healthChecker)
-			if err != nil {
-				return nil
-			}
-			return err
-		})
-	}
-	err := eg.Wait()
-	if err != nil {
-		panic(err)
-	}
-}
-
-func (dag *Dag) CreateImage( /*ctx context.Context, */ healthChecker string) {
-
-	if dag.ContainerCmd == nil {
-		panic("ContainerCmd is not set")
-	}
-
-	for _, v := range dag.nodes {
-		err := dag.ContainerCmd.CreateImage(v, healthChecker)
-		if err != nil {
-			panic(err)
-		}
-	}
-}
-
-// TODO 정상 작동하면 channel 설정하자.
-// https://jacking75.github.io/go_channel_howto/
 func connectRunner(n *Node) {
-	n.runner = func(ctx context.Context, n *Node, result chan *printStatus) {
+	n.runner = func(ctx context.Context, result chan *printStatus) {
 		defer close(result)
-		r := preFlight(ctx, n)
-		result <- r
-		r = inFlight(n)
-		result <- r
-		r = postFlight(n)
-		result <- r
+		result <- preFlight(ctx, n)
+		result <- inFlight(n)
+		result <- postFlight(n)
 	}
 }
 
@@ -597,7 +443,7 @@ func (dag *Dag) GetReadyT(ctx context.Context) bool {
 		ch := make(chan *printStatus, StatusDefault)
 		//dag.runningStatus = append(dag.runningStatus, ch)
 		chs = append(chs, ch)
-		go v.runner(ctx, v, ch)
+		go v.runner(ctx, ch)
 	}
 	if dag.runningStatus != nil {
 		return false
@@ -618,13 +464,13 @@ func (dag *Dag) GetReady(ctx context.Context) bool {
 		if v.Id == StartNode {
 			start := make(chan *printStatus, StatusDefault)
 			chs = insert(chs, 0, start)
-			go v.runner(ctx, v, start)
+			go v.runner(ctx, start)
 		}
 
 		if v.Id != StartNode && v.Id != EndNode {
 			ch := make(chan *printStatus, StatusDefault)
 			chs = append(chs, ch)
-			go v.runner(ctx, v, ch)
+			go v.runner(ctx, ch)
 		}
 
 		if v.Id == EndNode {
@@ -636,7 +482,7 @@ func (dag *Dag) GetReady(ctx context.Context) bool {
 		panic("EndNode is nil")
 	}
 	chs = append(chs, endCh)
-	go end.runner(ctx, end, endCh)
+	go end.runner(ctx, endCh)
 
 	if dag.runningStatus != nil {
 		return false
@@ -905,7 +751,6 @@ func copyDag(original *Dag) (map[string]*Node, []*Edge) {
 		}
 		newNodes[newNode.Id] = newNode
 	}
-
 	// 2. 원본 노드의 부모/자식 관계를 이용하여 새 노드들의 포인터 연결
 	for _, n := range original.nodes {
 		newNode := newNodes[n.Id]
@@ -922,7 +767,6 @@ func copyDag(original *Dag) (map[string]*Node, []*Edge) {
 			}
 		}
 	}
-
 	// 3. 간선(Edge) 복사: detectCycle 에 필요하다면 parentId와 childId만 복사
 	newEdges := make([]*Edge, len(original.Edges))
 	for i, e := range original.Edges {
@@ -1019,17 +863,6 @@ func nodeExist(dag *Dag, nodeId string) (*Node, bool) {
 		}
 	}
 	return nil, false
-}
-
-// Deprecated: Use edgeExists instead.
-// findEdges returns -1 if an edge with the same parentId and childId exists, or 0 if not.
-func findEdges(es []*Edge, parentId, childId string) int {
-	for _, e := range es {
-		if e.parentId == parentId && e.childId == childId {
-			return -1
-		}
-	}
-	return 0
 }
 
 func edgeExists(edges []*Edge, parentId, childId string) bool {
@@ -1184,7 +1017,6 @@ func verifyCopiedDag(original *Dag, newNodes map[string]*Node, newEdges []*Edge,
 			}
 		}
 	}
-
 	// (3) 간선 검증
 	if len(newEdges) != len(original.Edges) {
 		errs = append(errs, fmt.Sprintf("[%s] expected %d edges, got %d", methodName, len(original.Edges), len(newEdges)))

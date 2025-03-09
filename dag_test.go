@@ -569,6 +569,49 @@ func TestCopyDagIndependence(t *testing.T) {
 
 }
 
+// TODO detectCycleDFS, DetectCycle 테스트 필요.
+
+func TestDetectCycle(t *testing.T) {
+	// 새로운 DAG 생성
+	dag, _ := InitDag()
+
+	// 엣지 추가
+	if err := dag.AddEdge(dag.StartNode.Id, "1"); err != nil {
+		t.Fatalf("failed to add edge from StartNode to '1': %v", err)
+	}
+	if err := dag.AddEdge("1", "2"); err != nil {
+		t.Fatalf("failed to add edge from '1' to '2': %v", err)
+	}
+	if err := dag.AddEdge("1", "3"); err != nil {
+		t.Fatalf("failed to add edge from '1' to '3': %v", err)
+	}
+	if err := dag.AddEdge("1", "4"); err != nil {
+		t.Fatalf("failed to add edge from '1' to '4': %v", err)
+	}
+	if err := dag.AddEdge("2", "5"); err != nil {
+		t.Fatalf("failed to add edge from '2' to '5': %v", err)
+	}
+	if err := dag.AddEdge("5", "6"); err != nil {
+		t.Fatalf("failed to add edge from '5' to '6': %v", err)
+	}
+
+	// DAG 완성 처리
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag failed: %v", err)
+	}
+
+	// 방문 기록 맵 초기화
+	visit := make(map[string]bool)
+	for id := range dag.nodes {
+		visit[id] = false
+	}
+	// detectCycle 함수 테스트, cycle 이면 true 반환.
+	cycle := DetectCycle(dag)
+	if cycle {
+		t.Errorf("expected no cycle, but detected one")
+	}
+}
+
 func TestSimpleDag(t *testing.T) {
 	// runnable := Connect()
 	dag, _ := InitDag()
@@ -610,50 +653,5 @@ func TestSimpleDag(t *testing.T) {
 	b2 := dag.Wait(ctx)
 	if b2 != true {
 		t.Errorf("expected Wait() to return true, got %v", b2)
-	}
-}
-
-func TestDetectCycle(t *testing.T) {
-	// 새로운 DAG 생성
-	dag, _ := InitDag()
-
-	// 엣지 추가
-	if err := dag.AddEdge(dag.StartNode.Id, "1"); err != nil {
-		t.Fatalf("failed to add edge from StartNode to '1': %v", err)
-	}
-	if err := dag.AddEdge("1", "2"); err != nil {
-		t.Fatalf("failed to add edge from '1' to '2': %v", err)
-	}
-	if err := dag.AddEdge("1", "3"); err != nil {
-		t.Fatalf("failed to add edge from '1' to '3': %v", err)
-	}
-	if err := dag.AddEdge("1", "4"); err != nil {
-		t.Fatalf("failed to add edge from '1' to '4': %v", err)
-	}
-	if err := dag.AddEdge("2", "5"); err != nil {
-		t.Fatalf("failed to add edge from '2' to '5': %v", err)
-	}
-	if err := dag.AddEdge("5", "6"); err != nil {
-		t.Fatalf("failed to add edge from '5' to '6': %v", err)
-	}
-
-	// DAG 완성 처리
-	if err := dag.FinishDag(); err != nil {
-		t.Fatalf("FinishDag failed: %v", err)
-	}
-
-	// 방문 기록 맵 초기화
-	visit := make(map[string]bool)
-	for id := range dag.nodes {
-		visit[id] = false
-	}
-
-	// detectCycle 함수 테스트
-	cycle, end := dag.detectCycle(dag.StartNode.Id, dag.StartNode.Id, visit)
-	if cycle {
-		t.Errorf("expected no cycle, but detected one")
-	}
-	if !end {
-		t.Errorf("expected the entire graph to be traversed, but it was not")
 	}
 }

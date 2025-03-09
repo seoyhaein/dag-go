@@ -1,2 +1,0 @@
-PASS
-ok  	github.com/seoyhaein/dag-go	0.020s

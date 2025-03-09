@@ -24,7 +24,7 @@ type Node struct {
 	//status         string
 	childrenVertex []chan runningStatus
 	parentVertex   []chan runningStatus
-	runner         func(ctx context.Context, n *Node, result chan *printStatus)
+	runner         func(ctx context.Context, result chan *printStatus)
 
 	// add by seoy race 문제 해결을 위해 22/09/08
 	//nodeStatus chan *printStatus
@@ -84,35 +84,18 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 	err := eg.Wait()
 	if err == nil && try {
 		n.succeed = true
-		fmt.Println("Preflight succeeded for node", n.Id)
+		// do not erase
+		// fmt.Println 은 표준 출력(stdout)으로 나와서 벤치마크테스트 결과에 나와서 benchstat 이 그 출력 결과물을 파싱하는데 에러가 발생하여서 표준 에러 (stderr) 결과를 출력하도록 바꿈.
+		Log.Println("Preflight succeeded for node", n.Id)
 		return &printStatus{Preflight, n.Id}
 	}
 
 	n.succeed = false
-	fmt.Println("Preflight failed for node", n.Id, "error:", err)
+	// do not erase
+	// fmt.Println 은 표준 출력(stdout)으로 나와서 벤치마크테스트 결과에 나와서 benchstat 이 그 출력 결과물을 파싱하는데 에러가 발생하여서 표준 에러 (stderr) 결과를 출력하도록 바꿈.
+	Log.Println("Preflight failed for node", n.Id, "error:", err)
 	return &printStatus{PreflightFailed, noNodeId}
 }
-
-// (do not erase) 참고 자료용
-/*func preFlight(n *Node) *printStatus {
-
-	if n == nil {
-		return &printStatus{PreflightFailed, noNodeId}
-	}
-	i := len(n.parentVertex) // 부모 채널의 수
-	wg := new(sync.WaitGroup)
-	for j := 0; j < i; j++ {
-		wg.Add(1)
-		go func(c chan int) {
-			defer wg.Done()
-			<-c
-			//close(c) postFlight 에서 close 해줌.
-		}(n.parentVertex[j])
-	}
-	wg.Wait() // 모든 고루틴이 끝날 때까지 기다림
-
-	return &printStatus{Preflight, n.Id}
-}*/
 
 // inFlight preFlight, inFlight, postFlight 에서의 node 는 같은 노드이다.
 // runner 에서 순차적으로 동작한다.
@@ -211,88 +194,6 @@ func getNextNode(n *Node) *Node {
 	n.children = append(n.children[:0], n.children[1:]...)
 
 	return ch
-}
-
-// 자식 노드가 서로 다른 노드가 들어감. 데이터 내용은 같으나, 포인터가 다르다.
-// visit 은 node.Id 로 방문 기록을 하고,
-// ns 의 경우는 만약 자식노드가 생성이 되었고(방문이되으면) ns 에서 방문한(생성한) 자식노드를 넣어준다.
-// 만약 circle 이면 무한루프 돔. (1,3), (3,1)
-// visited 를 분리 해야 할까??
-// cycle 이면 true, cycle 이 아니면 false
-// deprecated cloneGraph
-func cloneGraph(ns map[string]*Node) (map[string]*Node, bool) {
-
-	if ns == nil {
-		return nil, false
-	}
-
-	var (
-		counter     = 0
-		numElements = len(ns)
-		iscycle     = false
-	)
-
-	visited := make(map[string]*Node, len(ns))
-
-	var _cloneGraph func(node *Node, visited map[string]*Node) (*Node, bool)
-	_cloneGraph = func(node *Node, visited map[string]*Node) (*Node, bool) {
-		var (
-			dupe  *Node
-			cycle = false
-		)
-
-		if node == nil {
-			return nil, false
-		}
-
-		n := visited[node.Id]
-		// 여기서 cycle 을 잡을 수 있다.
-		counter++
-		// TODO 여기서 부터 220121
-		if n != nil {
-			dupe = n
-			return dupe, false
-		} else {
-
-			if counter > numElements {
-				return nil, true
-			}
-			dupe = new(Node)
-			// 아래에도 있고 위에도 있음. 잘 이해해야함
-			visited[node.Id] = dupe
-
-			if node.children == nil {
-				dupe.Id = node.Id
-				//dupe.iterId = node.iterId
-				dupe.children = nil
-				dupe.parentDag = node.parentDag
-
-			} else { // node.children 이 nil 이 아닐 경우
-				dupe.children = make([]*Node, len(node.children))
-				for i, ch := range node.children { // TODO 테스트 진행해야 한다.
-					dupe.children[i], cycle = _cloneGraph(ch, visited)
-				}
-				// 부모의 정보를 입력한다.
-				dupe.Id = node.Id
-				//dupe.iterId = node.iterId
-				dupe.parentDag = node.parentDag
-			}
-
-			visited[dupe.Id] = dupe
-		}
-
-		return dupe, cycle
-	}
-
-	for _, v := range ns {
-		// _cloneGraph 실행될때 마다 visited 는 추가됨.
-		_, iscycle = _cloneGraph(v, visited)
-		if iscycle {
-			break
-		}
-	}
-
-	return visited, iscycle
 }
 
 func createNode(id string, r Runnable) *Node {

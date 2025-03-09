@@ -190,4 +190,149 @@ func CopyDag(original *Dag, Id string) (copied *Dag) {
 	copied.ContainerCmd = original.ContainerCmd
 	return
 }
+
+// cycle 이면 true, cycle 이 아니면 false
+// 이상태서 리턴 중복되는 것과 recursive 확인하자.
+// 첫번째 bool 은 circle 인지, 두번째 bool 은 다 돌았는지
+// BUG(seoy): 이상 현상 발생
+// detectCycle runningStatus 과 start, restart, pause, stop 등 추가 후 버그 개선
+func (dag *Dag) detectCycle(startNodeId string, endNodeId string, visit map[string]bool) (bool, bool) {
+	// 복사 할때 원본이 복사가 되는지 확인해서
+	// getLefMostNode 할때 지워지는지 확인해야한다.
+	var (
+		nextNode    *Node // 자식 노 추후 이름 바꿈.
+		currentNode *Node // current node 추후 이름 바꿈.
+		curId       string
+		cycle       bool // 서클인지 확인, circle 이면 true
+		end         bool // 다 순회했는지 확인, 다 순회하면 true
+	)
+	// TODO dag.nodes nil check 해야함.
+	ns, check := cloneGraph(dag.nodes)
+	// cycle 이면 true, cycle 이 아니면 false
+	if check {
+		return true, false
+	}
+
+	curId = endNodeId
+
+	cycle = false
+	end = false
+
+	// visit 이 모두 true 인데 이동할 자식이 있는 경우는 circle 이다.
+	if checkVisit(visit) {
+		// 즉, getLefMostNode 에서는 지워지는데 ns 를 지운다. 그리고 모두 방문했는데 자식노드가 있다면 그것은 cycle 이다.
+		n := getNode(endNodeId, dag.nodes)
+		if len(n.children) > 0 {
+			return true, end // circle, end
+		}
+	}
+
+	// 그외의 조건들일 경우 방문처리를 진행함.
+	// 여기서 오해하지 말아야 할 경우는 detectCycle 는 recursive func 임.
+	// 처음 초기 설정 값은 start_node_id 와 end_node_id 가 start_node_id 로 설정될 것임.
+	visit[endNodeId] = true
+
+	// DFS(깊이우선 방식으로 graph 를 순회함.
+	currentNode = getNode(endNodeId, ns)
+
+	if currentNode != nil {
+		nextNode = getNextNode(currentNode)
+
+		if nextNode != nil {
+			endNodeId = nextNode.Id
+		}
+	}
+
+	for nextNode != nil {
+		cycle, end = dag.detectCycle(startNodeId, endNodeId, visit) // 파라미터의 temp1 는 부모를 넣저.
+		fmt.Println(ns[curId].Id)                                   // TODO 이거 주석 처리했다고 리턴값이 달라짐.
+
+		end = checkVisit(visit)
+
+		if end {
+			return cycle, end
+		}
+
+		// cycle 이면 리턴
+		if cycle {
+			return cycle, end
+		}
+
+		// 여기서 부모 노드이다.
+		parentNode := getNode(curId, ns)
+		if parentNode != nil {
+			nextNode = getNextNode(parentNode)
+			if nextNode != nil {
+				endNodeId = nextNode.Id
+				end = false
+			}
+			end = true
+			nextNode = nil
+		}
+	}
+	return cycle, end
+}
+
+// gpt 수정 버전본.
+func (dag *Dag) detectCycleT(startNodeId string, endNodeId string, visit map[string]bool) (bool, bool) {
+	var (
+		nextNode    *Node // The next node to visit
+		currentNode *Node // The current node being visited
+		curId       string
+		cycle       bool // True if a cycle is detected
+		end         bool // True if the entire graph has been traversed
+	)
+
+	// Clone the graph and check for a cycle.
+	ns, check := cloneGraph(dag.nodes)
+	if check {
+		return true, false // A cycle was detected during cloning
+	}
+
+	curId = endNodeId
+	cycle = false
+	end = false
+
+	// If all nodes are visited, but there are still children left to visit, then it is a cycle.
+	if checkVisit(visit) {
+		n := getNode(endNodeId, dag.nodes)
+		if len(n.children) > 0 {
+			return true, end // It's a cycle
+		}
+	}
+
+	// Mark the current node as visited.
+	visit[endNodeId] = true
+
+	// Perform a Depth First Search (DFS).
+	currentNode = getNode(endNodeId, ns)
+	if currentNode != nil {
+		nextNode = getNextNode(currentNode)
+		if nextNode != nil {
+			endNodeId = nextNode.Id
+		}
+	}
+
+	for nextNode != nil {
+		// Recursive call to detect cycles.
+		cycle, end = dag.detectCycle(startNodeId, endNodeId, visit)
+		if end || cycle {
+			return cycle, end // If a cycle is detected or all nodes are visited, exit the loop.
+		}
+
+		// Move to the next node.
+		parentNode := getNode(curId, ns)
+		if parentNode != nil {
+			nextNode = getNextNode(parentNode)
+			if nextNode != nil {
+				endNodeId = nextNode.Id
+				end = false
+			}
+			end = true
+			nextNode = nil
+		}
+	}
+
+	return cycle, end
+}
 ```
