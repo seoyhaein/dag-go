@@ -780,6 +780,53 @@ func copyDag(original *Dag) (map[string]*Node, []*Edge) {
 	return newNodes, newEdges
 }
 
+func copyDagT(original *Dag) (map[string]*Node, []*Edge) {
+	// 원본에 노드가 없으면 nil 반환
+	if len(original.nodes) == 0 {
+		return nil, nil
+	}
+
+	// 1. 노드의 기본 정보(ID)만 복사한 새 맵 생성
+	newNodes := make(map[string]*Node, len(original.nodes))
+	for _, n := range original.nodes {
+		// 필요한 최소한의 정보만 복사
+		newNode := &Node{
+			Id: n.Id,
+			// 기타 필드는 cycle 검증에 필요하지 않으므로 생략
+		}
+		newNodes[newNode.Id] = newNode
+	}
+
+	// 2. 원본 노드의 부모/자식 관계를 이용하여 새 노드들의 포인터 연결
+	for _, n := range original.nodes {
+		newNode := newNodes[n.Id]
+		// 부모 노드 연결
+		for _, parent := range n.parent {
+			if copiedParent, ok := newNodes[parent.Id]; ok {
+				newNode.parent = append(newNode.parent, copiedParent)
+			}
+		}
+		// 자식 노드 연결
+		for _, child := range n.children {
+			if copiedChild, ok := newNodes[child.Id]; ok {
+				newNode.children = append(newNode.children, copiedChild)
+			}
+		}
+	}
+
+	// 3. 간선(Edge) 복사: detectCycle 에 필요하다면 parentId와 childId만 복사
+	newEdges := make([]*Edge, len(original.Edges))
+	for i, e := range original.Edges {
+		newEdges[i] = &Edge{
+			parentId: e.parentId,
+			childId:  e.childId,
+			// vertex 등 기타 정보는 cycle 검증에 필요하지 않으므로 생략
+		}
+	}
+
+	return newNodes, newEdges
+}
+
 // CopyDag dag 를 복사함.
 func CopyDag(original *Dag, newId string) *Dag {
 	// 원본이 nil 이면 nil 반환

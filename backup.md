@@ -716,3 +716,717 @@ func cloneGraph(ns map[string]*Node) (map[string]*Node, bool) {
 }*/
 
 ```
+
+```aiignore
+// parser.go
+
+package dag_go
+
+import (
+	"bytes"
+	"context"
+	"encoding/xml"
+	"fmt"
+	"io"
+)
+
+// TODO xml 에서 nodes id 가 있어야 하고, pipeline id 와 매핑 되고,
+// dag ID 는 uuid 인데, 이것은 xml 에서 데이터와 연계 될때 생성되는 uuid 값을 가지고 와서 매핑 된다.
+// TODO xmlNode 를 별도로 두었지만, Node 로 통합하자.
+// Nodes 를 어디에 둘지 고민..
+// xml 이 수정될때 마다 수정해야 함으로 어느정도 완성된다음에 코드 수정 및 정리를 하자.
+
+func xmlParser(x []*Node) (context.Context, bool, *Dag) {
+
+	if x == nil {
+		return nil, false, nil
+	}
+
+	n := len(x)
+	//TODO 일단 에러 때문에 이렇게 넣었지만, 이걸 외부로 빼야함.
+	//runnable := Connect()
+	dag := NewDag()
+
+	if n >= 1 { // node 가 최소 하나 이상은 있어야 한다.
+		//dag := NewDag()
+		// 순서데로 들어가기 때문에 for range 보다 유리함.
+		for i := 0; i < n; i++ {
+			no := x[i]
+
+			// from 이 없으면 root 임.
+			rn := len(no.from)
+			if rn == 0 {
+				dag.AddNodeToStartNode(no)
+			}
+			// 자신이 from 이므로, to 만 신경쓰면 된다.
+			for _, v := range no.to {
+				from := findNode(x, v)
+				dag.AddEdge(no.Id, from.Id)
+			}
+		}
+
+		//visited := dag.visitReset()
+		//dag.detectCycle(dag.StartNode.Id, dag.StartNode.Id, visited)
+		//result, _ := dag.detectCycle(dag.startNode.Id, dag.startNode.Id, visited)
+		//fmt.Printf("%t", result)
+
+		// 테스트 용도로 일단 넣어둠.
+		dag.FinishDag()
+
+		ctx := context.Background()
+		dag.ConnectRunner()
+		//dag.DagSetFunc()
+		dag.GetReady(ctx)
+		//dag.start()
+
+		//b := dag.Wait(nil)
+		//fmt.Println("모든 고루틴이 종료될때까지 그냥 기다림.")
+		//fmt.Printf("true 이면 정상 : %t", b)
+
+		return ctx, true, dag
+	}
+
+	return nil, false, nil
+}
+
+// TODO 함수들 정리해서 놓자.
+
+func xmlProcess(parser *xml.Decoder) (int, []*Node) {
+	var (
+		counter         = 0
+		n       *Node   = nil
+		ns      []*Node = nil
+		// TODO bool 로 하면 안됨 int 로 바꿔야 함. 초기 값은 0, false = 1, true = 2 로
+		xStart    = false
+		nStart    = false
+		cmdStart  = false
+		fromStart = false
+		toStart   = false
+	)
+	// TODO error 처리 해줘야 함.
+	if parser == nil {
+		return 0, nil
+	}
+
+	for {
+		token, err := parser.Token()
+
+		// TODO 아래 두 if 구문 향후 수정하자.
+		if err == io.EOF {
+			break // TODO break 구문 수정 처리 필요.
+		}
+
+		// TODO 중복되는 것 같지만 일단 그냥 넣어둠.
+		if token == nil {
+			break
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			//elem := xml.StartElement(t)
+			xmlTag := t.Name.Local
+			if xmlTag == nodes {
+				xStart = true
+			}
+			if xmlTag == node {
+				nStart = true
+
+				n = new(Node)
+				// node id 가 없으면 error 임.
+				// 현재는 node 의 경우 속성이 1 이도록 강제함. 추후 수정할 필요가 있으면 수정.
+				if len(t.Attr) != 1 {
+					fmt.Println("node id 가 없음")
+					return 0, nil
+				}
+
+				// TODO id 가 아니면 error	- strict 하지만 일단 이렇게
+				if t.Attr[0].Name.Local == id {
+					for _, v := range ns {
+						if v.Id == t.Attr[0].Value {
+							fmt.Println("중복된 node Id 존재")
+							return 0, nil
+						}
+					}
+					n.Id = t.Attr[0].Value
+				}
+			}
+
+			if xmlTag == command {
+				cmdStart = true
+			}
+
+			if xmlTag == from {
+				fromStart = true
+			}
+
+			if xmlTag == to {
+				toStart = true
+			}
+
+			counter++
+		case xml.EndElement:
+			//elem := xml.EndElement(t)
+			xmlTag := t.Name.Local
+			if xmlTag == nodes {
+				if xStart {
+					xStart = false
+				} else {
+					fmt.Println("error") // TODO error 처리 해줘야 함.
+				}
+			}
+			// TODO 중복 구문들 function 으로 만들자.
+			if xmlTag == node {
+				if xStart { // StartElement 에서 true 해줌
+					if nStart { // StartElement 에서 true 해줌
+						if n != nil { // TODO nil 일 경우는 에러 처리 해줘야 함.
+							ns = append(ns, n)
+							nStart = false
+							n = nil
+						}
+					}
+				}
+			}
+
+			if xmlTag == from {
+				if xStart {
+					if nStart {
+						if n != nil {
+							fromStart = false
+						}
+					}
+				}
+			}
+
+			if xmlTag == to {
+				if xStart {
+					if nStart {
+						if n != nil {
+							toStart = false
+						}
+					}
+				}
+			}
+
+			if xmlTag == command {
+				if xStart {
+					if nStart {
+						if cmdStart {
+							cmdStart = false
+						}
+					}
+				}
+			}
+			counter++
+
+		case xml.CharData:
+			if nStart {
+				if n != nil {
+					if cmdStart {
+						// TODO string converting 바꾸기
+						n.Commands = string(t)
+					}
+					if fromStart {
+						n.from = append(n.from, string(t))
+					}
+					if toStart {
+						n.to = append(n.to, string(t))
+					}
+				}
+			}
+		}
+	}
+
+	// TODO  일단 이렇게 그냥 해둠.
+	return counter, ns
+}
+
+func newDecoder(b []byte) *xml.Decoder {
+	// (do not erase) NewDecoder 에서 Strict field true 해줌.
+	d := xml.NewDecoder(bytes.NewReader(b))
+	return d
+}
+
+func XmlParser(d []byte) (context.Context, bool, *Dag) {
+
+	decoder := newDecoder(d)
+	_, nodes := xmlProcess(decoder)
+	ctx, b, dag := xmlParser(nodes)
+
+	return ctx, b, dag
+}
+
+```
+
+```
+//parser_test.go
+
+package dag_go
+
+import (
+	"fmt"
+	"testing"
+)
+
+func TestXmlProcess(t *testing.T) {
+	d := serveXml()
+	decoder := newDecoder(d)
+	c, nodes := xmlProcess(decoder)
+
+	fmt.Println("count :", c)
+
+	for _, node := range nodes {
+		fmt.Println("Node Id: ", node.Id)
+		for _, t := range node.to {
+			fmt.Println("To", t)
+		}
+		for _, f := range node.from {
+			fmt.Println("From", f)
+		}
+		fmt.Println("Command ", node.Commands)
+
+	}
+}
+
+func TestXmlsProcess(t *testing.T) {
+	xmls := serveXmls()
+	num := len(xmls)
+	if num == 0 {
+		fmt.Println("값이 없음")
+		return
+	}
+
+	for _, xml := range xmls {
+		d := []byte(xml)
+
+		decoder := newDecoder(d)
+		c, nodes := xmlProcess(decoder)
+
+		fmt.Println("count :", c)
+
+		for _, node := range nodes {
+			fmt.Println("Node Id: ", node.Id)
+			for _, t := range node.to {
+				fmt.Println("To", t)
+			}
+			for _, f := range node.from {
+				fmt.Println("From", f)
+			}
+			fmt.Println("Command ", node.Commands)
+
+		}
+	}
+
+}
+
+// 여러 형태의 xml 테스트 필요, 깨진 xml 로도 테스트 진행 필요.
+// TODO nodes id 를 고유하게 만들어줘서, 이걸 dag id 로 넣어주자.
+func serveXml() []byte {
+	// id, to, from, command
+	// id 는 attribute, to, from, command 는 tag
+	// to, from 은 복수 가능.
+	// from 이 없으면 시작노드, 파싱된 후에 start_node, end_node 추가 됨.
+	xml := `
+	<nodes>
+		<node id = "1">
+			<to>2</to>
+			<command> echo "hello world 1"</command>
+		</node>
+		<node id = "2" >
+			<from>1</from>
+			<to>3</to>
+			<to>8</to>
+			<command>echo "hello world 2"</command>
+		</node>
+		<node id ="3" >
+			<from>2</from>
+			<to>4</to>
+			<to>5</to>
+			<command>echo "hello world 3"</command>
+		</node>
+		<node id ="4" >
+			<from>3</from>
+			<to>6</to>
+			<command>echo "hello world 4"</command>
+		</node>
+		<node id ="5" >
+			<from>3</from>
+			<to>6</to>
+			<command>echo "hello world 5"</command>
+		</node>
+		<node id ="6" >
+			<from>4</from>
+			<from>5</from>
+			<to>7</to>
+			<command>echo "hello world 6"</command>
+		</node>
+		<node id ="7" >
+			<from>6</from>
+			<to>9</to>
+			<to>10</to>
+			<command>echo "hello world 7"</command>
+		</node>
+		<node id ="8" >
+			<from>2</from>
+			<command>echo "hello world 8"</command>
+		</node>
+		<node id ="9" >
+			<from>7</from>
+			<to>11</to>
+			<command>echo "hello world 9"</command>
+		</node>
+		<node id ="10" >
+			<from>7</from>
+			<to>11</to>
+			<command>echo "hello world 10"</command>
+		</node>
+		<node id ="11" >
+			<from>9</from>
+			<from>10</from>
+			<command>echo "hello world 11"</command>
+		</node>
+	</nodes>`
+
+	return []byte(xml)
+}
+
+func serveXmls() []string {
+	var xs []string
+
+	// nodes 가 없는 경우
+	failedXml3 := `
+		<node id = "1" >
+			<to>2</to>
+			<command> echo "hello world 1"</command>
+		</node>
+		<node id = "2" >
+			<from>1</from>
+			<to>3</to>
+			<command>echo "hello world 2"</command>
+		</node>
+		<node id ="3" >
+			<from>2</from>
+			<command>echo "hello world 3"</command>
+		</node>`
+
+	//xs = append(xs, failedXml1)
+	//xs = append(xs, failedXml2)
+	xs = append(xs, failedXml3)
+	//xs = append(xs, failedXml4)
+
+	return xs
+}
+
+func xmlss() {
+	// id 가 없는 node
+	failedXml1 := `
+	<nodes>
+		<node>
+			<to>2</to>
+			<command> echo "hello world 1"</command>
+		</node>
+		<node id = "2" >
+			<from>1</from>
+			<to>3</to>
+			<command>echo "hello world 2"</command>
+		</node>
+		<node id ="3" >
+			<from>2</from>
+			<command>echo "hello world 3"</command>
+		</node>
+	</nodes>`
+
+	// node id 가 중복된 경우
+	failedXml2 := `
+	<nodes>
+		<node id = "2" >
+			<to>2</to>
+			<command> echo "hello world 1"</command>
+		</node>
+		<node id = "2" >
+			<from>1</from>
+			<to>3</to>
+			<command>echo "hello world 2"</command>
+		</node>
+		<node id ="3" >
+			<from>2</from>
+			<command>echo "hello world 3"</command>
+		</node>
+	</nodes>`
+
+	// nodes 가 없는 경우
+	failedXml3 := `
+		<node id = "1" >
+			<to>2</to>
+			<command> echo "hello world 1"</command>
+		</node>
+		<node id = "2" >
+			<from>1</from>
+			<to>3</to>
+			<command>echo "hello world 2"</command>
+		</node>
+		<node id ="3" >
+			<from>2</from>
+			<command>echo "hello world 3"</command>
+		</node>`
+
+	// circle TODO 다수 테스트 진행해야함.
+	failedXml4 := `
+	<nodes>
+		<node id = "1">
+			<to>2</to>
+			<command> echo "hello world 1"</command>
+		</node>
+		<node id = "2" >
+			<from>1</from>
+			<to>3</to>
+			<to>1</to>
+			<command>echo "hello world 2"</command>
+		</node>
+		<node id ="3" >
+			<from>2</from>
+			<command>echo "hello world 3"</command>
+		</node>
+	</nodes>`
+
+	fmt.Println(failedXml1)
+	fmt.Println(failedXml2)
+	fmt.Println(failedXml3)
+	fmt.Println(failedXml4)
+}
+
+// parser 테스트
+// TODO 버그 있음. read |0: file already closed
+// xmlParser 에서 입력 파라미터 포인터로 할지 생각하자.
+// 순서대로 출력되는지 파악해야 한다. 잘못 출력되는 경우 발견.
+func TestXmlParser(t *testing.T) {
+	d := serveXml()
+	decoder := newDecoder(d)
+	_, nodes := xmlProcess(decoder)
+
+	ctx, b, dag := xmlParser(nodes)
+
+	if b {
+		dag.Start()
+		dag.Wait(ctx)
+	}
+
+}
+
+```
+
+```aiignore
+// pipeline.go
+
+package dag_go
+
+import (
+	"context"
+	"fmt"
+	"github.com/seoyhaein/utils"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type Pipeline struct {
+	Id   string
+	Dags []*Dag
+
+	ContainerCmd Runnable
+}
+
+// NewPipeline  파이프라인은 dag NewPipeline와 데이터를 연계해야 하는데 데이터의 경우는 다른 xml 처리하는 것이 바람직할 것이다.
+// 외부에서 데이터를 가지고 올 경우, ftp 나 scp 나 기타 다른 프롤토콜을 사용할 경우도 생각을 해야 한다.
+func NewPipeline() *Pipeline {
+
+	return &Pipeline{
+		Id: uuid.NewString(),
+	}
+}
+
+// Start TODO 모든 dag 들을 실행 시킬 수 있어야 한다. 수정해줘야 한다
+func (pipe *Pipeline) Start(ctx context.Context) {
+	if pipe.Dags == nil {
+		return
+	}
+
+	for i, d := range pipe.Dags {
+		d.ConnectRunner()
+		//d.DagSetFunc()
+		d.GetReady(ctx)
+		d.Start()
+		d.Wait(ctx)
+		fmt.Println("count:", i)
+	}
+}
+
+// Stop 개발 중
+func (pipe *Pipeline) Stop(ctx context.Context, dag *Dag) {
+	time.After(time.Second * 2)
+}
+
+// ReStart 개발 중
+func (pipe *Pipeline) ReStart(ctx context.Context, dag *Dag) {
+
+}
+
+// NewDags 파이프라인과 dag 의 차이점은 데이터의 차이이다.
+// 즉, 같은 dag 이지만 데이터가 다를 수 있다.
+// 파이프라인에서 데이터 연계가 일어난다.
+// 하지만 데이터 관련 datakit 이 아직 만들어 지지 않았기 때문에 입력파라미터로 dag 수를 지정한다.
+// 이부분에서 두가지를 생각할 수 있다. dag 하나를 받아들여서 늘리는 방향과 dag 는 하나이고 데이터만큼만 어떠한 방식으로 진행하는 것이다.
+// 전자가 쉽게 생각할 수 있지만 메모리 낭비 가있다. 일단 전자로 개발한다. 후자는 아직 아이디어가 없다.
+// TODO 데이터와 관련해서 추가 해서 수정해줘야 한다. 추후 안정화 되면 panic 은 error 로 교체한다.
+func (pipe *Pipeline) NewDags(ds int, original *Dag) *Pipeline {
+	var dag *Dag
+
+	if utils.IsEmptyString(pipe.Id) {
+		panic("pipeline id is empty")
+	}
+
+	if ds < 1 {
+		panic("input parameter is invalid")
+	}
+
+	for i := 1; i <= ds; i++ {
+		dagId := fmt.Sprintf("%s-%d", pipe.Id, i)
+		dag = CopyDag(original, dagId)
+
+		if dag == nil {
+			panic("CopyDag failed")
+		}
+
+		pipe.Dags = append(pipe.Dags, dag)
+	}
+	return pipe
+}
+
+func (pipe *Pipeline) SetContainerCmd(r Runnable) error {
+	if r == nil {
+		return fmt.Errorf("runnable is nil")
+	}
+	if pipe.ContainerCmd == nil {
+		pipe.ContainerCmd = r
+	}
+	return nil
+}
+
+```
+
+```aiignore
+// pipeline_test.go
+
+package dag_go
+
+import (
+	"context"
+	"testing"
+)
+
+func TestNewPipeline(t *testing.T) {
+	d := NewDag()
+	d.AddEdge(d.StartNode.Id, "1")
+	d.AddEdge("1", "2")
+	d.AddEdge("1", "3")
+	d.AddEdge("1", "4")
+	d.AddEdge("2", "5")
+	d.AddEdge("5", "6")
+
+	/*d.AddCommand("1", `sleep 1`)
+	d.AddCommand("2", `sleep 1`)
+	d.AddCommand("3", `sleep 1`)
+	d.AddCommand("4", `sleep 1`)
+	d.AddCommand("5", `sleep 1`)
+	d.AddCommand("6", `sleep 1`)*/
+
+	err := d.FinishDag()
+	if err != nil {
+		panic(err)
+	}
+	//TODO 일단 구현에서 빠진 부분을 일단 보완하고 추가적으로 진행한다.
+	copied := CopyDag(d, "78")
+	ctx := context.Background()
+	copied.ConnectRunner()
+	//copy.DagSetFunc()
+	copied.GetReady(ctx)
+	copied.Start()
+	//time.Sleep(time.Second * 10)
+	copied.Wait(ctx)
+
+	//copy := CopyDag(d)
+	/*ctx := context.Background()
+	d.DagSetFunc()
+	d.GetReady(ctx)
+	d.Start()
+	d.Wait(ctx)*/
+}
+
+// 오류있어서 일단 테스트 해봐야 함.
+func TestNewPipeline01(t *testing.T) {
+	d := NewDag()
+	d.AddEdge(d.StartNode.Id, "1")
+	d.AddEdge("1", "2")
+	d.AddEdge("1", "3")
+	d.AddEdge("1", "4")
+	d.AddEdge("2", "5")
+	d.AddEdge("5", "6")
+
+	/*d.AddCommand("1", `sleep 1`)
+	d.AddCommand("2", `sleep 1`)
+	d.AddCommand("3", `sleep 1`)
+	d.AddCommand("4", `sleep 1`)
+	d.AddCommand("5", `sleep 1`)
+	d.AddCommand("6", `sleep 1`)*/
+
+	err := d.FinishDag()
+	if err != nil {
+		panic(err)
+	}
+	//TODO 일단 구현에서 빠진 부분을 일단 보완하고 추가적으로 진행한다.
+
+	pipe := NewPipeline()
+	pipe.NewDags(1000, d)
+	pipe.Start(context.Background())
+
+	/*copy := CopyDag(d, "78")
+	ctx := context.Background()
+	copy.DagSetFunc()
+	copy.GetReady(ctx)
+	copy.Start()
+	//time.Sleep(time.Second * 10)
+	copy.Wait(ctx)*/
+
+	//copy := CopyDag(d)
+	/*ctx := context.Background()
+	d.DagSetFunc()
+	d.GetReady(ctx)
+	d.Start()
+	d.Wait(ctx)*/
+}
+
+// TODO 추후에 개선하자.
+// https://www.practical-go-lessons.com/chap-34-benchmarks
+func BenchmarkStart(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		demo(1)
+	}
+}
+
+func demo(i int) {
+	d := NewDag()
+	d.AddEdge(d.StartNode.Id, "1")
+	d.AddEdge("1", "2")
+	d.AddEdge("1", "3")
+	d.AddEdge("1", "4")
+	d.AddEdge("2", "5")
+	d.AddEdge("5", "6")
+	err := d.FinishDag()
+	if err != nil {
+		panic(err)
+	}
+	pipe := NewPipeline()
+	pipe.NewDags(i, d)
+	pipe.Start(context.Background())
+}
+
+```

@@ -16,6 +16,7 @@ import (
 type Node struct {
 	Id string
 	// 컨테이너 빌드를 위한 from 이미지.
+	// TODO 이거 지워줘야 한다.
 	ImageName string
 	// TODO 이름 추후 수정하자.
 	RunCommand Runnable
@@ -32,9 +33,6 @@ type Node struct {
 	// add by seoy race 문제 해결을 위해 22/09/08
 	//nodeStatus chan *printStatus
 
-	// for xml parsing
-	from []string
-	to   []string
 	// TODO re-thinking
 	// https://yoongrammer.tistory.com/36
 	//context.Context
@@ -97,6 +95,47 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 	// do not erase
 	// fmt.Println 은 표준 출력(stdout)으로 나와서 벤치마크테스트 결과에 나와서 benchstat 이 그 출력 결과물을 파싱하는데 에러가 발생하여서 표준 에러 (stderr) 결과를 출력하도록 바꿈.
 	Log.Println("Preflight failed for node", n.Id, "error:", err)
+	return &printStatus{PreflightFailed, noNodeId}
+}
+
+// Deprecated : 테스트 완료.
+// preFlight_old_250306
+func preFlight_old_250306(ctx context.Context, n *Node) *printStatus {
+	if n == nil {
+		panic(fmt.Errorf("node is nil"))
+		// (do not erase) 안정화 버전 나올때는 panic 을 리턴으로 처리
+		//return &printStatus{PreflightFailed, noNodeId}
+	}
+	// (do not erase) goroutine 디버깅용
+	/*debugger.SetLabels(func() []string {
+		return []string{
+			"preFlight: nodeId", n.Id,
+		}
+	})*/
+
+	// 성공하면 context 사용한다.
+	eg, _ := errgroup.WithContext(ctx)
+	i := len(n.parentVertex) // 부모 채널의 수
+	for j := 0; j < i; j++ {
+		// (do not erase) 중요!! 여기서 들어갈 변수를 세팅않해주면 에러남.
+		k := j
+		c := n.parentVertex[k]
+		eg.Go(func() error {
+			result := <-c
+			if result == Failed {
+				fmt.Println("failed", n.Id)
+				return fmt.Errorf("failed")
+			}
+			return nil
+		})
+	}
+	if err := eg.Wait(); err == nil { // 대기
+		n.succeed = true
+		Log.Println("Preflight", n.Id)
+		return &printStatus{Preflight, n.Id}
+	}
+	n.succeed = false
+	Log.Println("PreflightFailed", n.Id)
 	return &printStatus{PreflightFailed, noNodeId}
 }
 

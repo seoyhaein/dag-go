@@ -1,13 +1,15 @@
 module github.com/seoyhaein/dag-go
 
-go 1.18
+go 1.23.0
+
+toolchain go1.23.7
 
 require (
 	github.com/dlsniper/debugger v0.6.0
 	github.com/google/uuid v1.3.0
 	github.com/seoyhaein/utils v0.0.6
 	github.com/sirupsen/logrus v1.9.0
-	golang.org/x/sync v0.0.0-20220907140024-f12130a52804
+	golang.org/x/sync v0.12.0
 )
 
 require (
