@@ -10,6 +10,9 @@ import (
 	"github.com/dlsniper/debugger"
 )
 
+// TODO panic 지우기. 중요 에러일 경우는 빠르게 종료 시키자.
+// TODO 외부 공개 api 가 내부 api 에 들어가 있는 경우 있음. 질서를 잡자.
+
 type Node struct {
 	Id string
 	// 컨테이너 빌드를 위한 from 이미지.
