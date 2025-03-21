@@ -68,7 +68,7 @@ func TestCreateNode(t *testing.T) {
 	// NewDag()를 호출하면 기본적으로 ContainerCmd 는 nil
 	dag := NewDag()
 	id := "test1"
-	node := dag.createNode(id)
+	node := dag.CreateNode(id)
 	if node == nil {
 		t.Fatalf("expected node to be created, got nil")
 	}
@@ -88,7 +88,7 @@ func TestCreateNode(t *testing.T) {
 		t.Errorf("expected dag.nodes[%s] to be the created node", id)
 	}
 	// 같은 id로 다시 노드를 생성하면 nil 이 반환되어야 함.
-	if dup := dag.createNode(id); dup != nil {
+	if dup := dag.CreateNode(id); dup != nil {
 		t.Errorf("expected duplicate createNode call to return nil, got %v", dup)
 	}
 
@@ -102,7 +102,7 @@ func TestCreateNode(t *testing.T) {
 	dag2.ContainerCmd = dummy
 
 	id2 := "test2"
-	node2 := dag2.createNode(id2)
+	node2 := dag2.CreateNode(id2)
 	if node2 == nil {
 		t.Fatalf("expected node2 to be created, got nil")
 	}
@@ -118,7 +118,7 @@ func TestCreateNode(t *testing.T) {
 		t.Errorf("expected RunCommand to be of type DummyRunnable, got %T", node2.RunCommand)
 	}
 	// 동일한 id로 다시 생성 시 nil을 반환하는지 검증
-	if dup2 := dag2.createNode(id2); dup2 != nil {
+	if dup2 := dag2.CreateNode(id2); dup2 != nil {
 		t.Errorf("expected duplicate createNode call to return nil, got %v", dup2)
 	}
 }

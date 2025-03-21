@@ -118,7 +118,7 @@ func NewDag() *Dag {
 }
 
 func (dag *Dag) StartDag() (*Dag, error) {
-	if dag.StartNode = dag.createNode(StartNode); dag.StartNode == nil {
+	if dag.StartNode = dag.CreateNode(StartNode); dag.StartNode == nil {
 		return nil, fmt.Errorf("failed to create start node")
 	}
 	// 시작 노드에 필수 채널 추가 (parentVertex 채널 삽입)
@@ -134,6 +134,7 @@ func InitDag() (*Dag, error) {
 	return dag.StartDag()
 }
 
+// TODO 삭제할 예정, 각노드에서 인터페이스를 받아서 미리 만들어 주는 형식으로 진행할 예정.
 func (dag *Dag) SetContainerCmd(r Runnable) {
 	dag.ContainerCmd = r
 }
@@ -186,8 +187,28 @@ func (dag *Dag) checkEdges() bool {
 	return false
 }
 
-// createNode creates a pointer to a new node, but returns nil if dag has a duplicate node id.
-func (dag *Dag) createNode(id string) *Node {
+// CreateNode creates a pointer to a new node, but returns nil if dag has a duplicate node id.
+func (dag *Dag) CreateNode(id string) *Node {
+	// 이미 해당 id의 노드가 존재하면 nil 반환
+	if _, exists := dag.nodes[id]; exists {
+		return nil
+	}
+	var node *Node
+	// TODO StartNode 와 EndNode 의 경우 ContainerCmd 이게 없을 수 있으므로 이렇게 한듯한데. 살펴보자.
+	if dag.ContainerCmd != nil {
+		node = createNode(id, dag.ContainerCmd)
+	} else {
+		node = createNodeWithId(id)
+	}
+
+	node.parentDag = dag
+	dag.nodes[id] = node
+
+	return node
+}
+
+// CreateNodeT creates a pointer to a new node, but returns nil if dag has a duplicate node id.
+func (dag *Dag) CreateNodeT(id string) *Node {
 	// 이미 해당 id의 노드가 존재하면 nil 반환
 	if _, exists := dag.nodes[id]; exists {
 		return nil
@@ -231,7 +252,7 @@ func (dag *Dag) AddEdge(from, to string) error {
 		if node := dag.nodes[id]; node != nil {
 			return node, nil
 		}
-		node := dag.createNode(id)
+		node := dag.CreateNode(id)
 		if node == nil {
 			return nil, logErr(fmt.Errorf("%s: createNode returned nil", id))
 		}
@@ -243,6 +264,60 @@ func (dag *Dag) AddEdge(from, to string) error {
 		return err
 	}
 	toNode, err := getOrCreateNode(to)
+	if err != nil {
+		return err
+	}
+
+	// 자식과 부모 관계 설정
+	fromNode.children = append(fromNode.children, toNode)
+	toNode.parent = append(toNode.parent, fromNode)
+
+	// 엣지 생성 및 검증
+	edge, check := dag.createEdge(fromNode.Id, toNode.Id)
+	if check == Fault || check == Exist {
+		return logErr(fmt.Errorf("edge cannot be created"))
+	}
+	if edge == nil {
+		return logErr(fmt.Errorf("vertex is nil"))
+	}
+
+	fromNode.childrenVertex = append(fromNode.childrenVertex, edge.vertex)
+	toNode.parentVertex = append(toNode.parentVertex, edge.vertex)
+	return nil
+}
+
+// AddEdgeT 이 메서드로 업데이트 예정.
+func (dag *Dag) AddEdgeT(from, to string) error {
+	// 에러 로그를 기록하고 반환하는 클로저 함수
+	logErr := func(err error) error {
+		dag.errLogs = append(dag.errLogs, &systemError{AddEdge, err})
+		return err
+	}
+
+	// 입력값 검증
+	if from == to {
+		return logErr(fmt.Errorf("from-node and to-node are same"))
+	}
+	if utils.IsEmptyString(from) {
+		return logErr(fmt.Errorf("from-node is empty string"))
+	}
+	if utils.IsEmptyString(to) {
+		return logErr(fmt.Errorf("to-node is empty string"))
+	}
+
+	// 노드를 가져오는 클로저 함수: 노드가 없으면 에러 리턴
+	getNode := func(id string) (*Node, error) {
+		if node := dag.nodes[id]; node != nil {
+			return node, nil
+		}
+		return nil, logErr(fmt.Errorf("%s: node does not exist", id))
+	}
+
+	fromNode, err := getNode(from)
+	if err != nil {
+		return err
+	}
+	toNode, err := getNode(to)
 	if err != nil {
 		return err
 	}
@@ -320,7 +395,7 @@ func (dag *Dag) FinishDag() error {
 	}
 
 	// 종료 노드 생성 및 초기화
-	dag.EndNode = dag.createNode(EndNode)
+	dag.EndNode = dag.CreateNode(EndNode)
 	if dag.EndNode == nil {
 		return logErr(fmt.Errorf("failed to create end node"))
 	}
