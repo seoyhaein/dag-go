@@ -207,26 +207,6 @@ func (dag *Dag) CreateNode(id string) *Node {
 	return node
 }
 
-// CreateNodeT creates a pointer to a new node, but returns nil if dag has a duplicate node id.
-func (dag *Dag) CreateNodeT(id string) *Node {
-	// 이미 해당 id의 노드가 존재하면 nil 반환
-	if _, exists := dag.nodes[id]; exists {
-		return nil
-	}
-	var node *Node
-	// TODO StartNode 와 EndNode 의 경우 ContainerCmd 이게 없을 수 있으므로 이렇게 한듯한데. 살펴보자.
-	if dag.ContainerCmd != nil {
-		node = createNode(id, dag.ContainerCmd)
-	} else {
-		node = createNodeWithId(id)
-	}
-
-	node.parentDag = dag
-	dag.nodes[id] = node
-
-	return node
-}
-
 // AddEdge error log 는 일단 여기서만 작성 TODO 로그를 기록하는 것을 활용할 방안 찾기, 또는 필요없으면 지우기.
 func (dag *Dag) AddEdge(from, to string) error {
 	// TODO 이걸 빼서 메서드를 만들지 고민하자.
@@ -286,8 +266,8 @@ func (dag *Dag) AddEdge(from, to string) error {
 	return nil
 }
 
-// AddEdgeT 이 메서드로 업데이트 예정.
-func (dag *Dag) AddEdgeT(from, to string) error {
+// AddEdgeIfNodesExist 이 메서드로 업데이트 예정. 노드가 없다면 에러를 리턴한다.
+func (dag *Dag) AddEdgeIfNodesExist(from, to string) error {
 	// 에러 로그를 기록하고 반환하는 클로저 함수
 	logErr := func(err error) error {
 		dag.errLogs = append(dag.errLogs, &systemError{AddEdge, err})
