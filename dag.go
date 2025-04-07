@@ -547,7 +547,7 @@ func (dag *Dag) GetReady(ctx context.Context) bool {
 }
 
 // https://stackoverflow.com/questions/46128016/insert-a-value-in-a-slice-at-a-given-index
-// insert 테스트 후 utils 에 넣기
+// insert inserts a value into a slice at the specified index.
 func insert(a []chan *printStatus, index int, value chan *printStatus) []chan *printStatus {
 	if len(a) == index { // nil or empty slice or after last element
 		return append(a, value)
@@ -647,7 +647,7 @@ func (dag *Dag) merge() {
 	}
 }
 
-// mergeT 테스트는 내일 하자.
+// mergeT TODO 테스트는 내일 하자.
 func (dag *Dag) mergeT() {
 	defer close(dag.RunningStatus)
 
