@@ -53,8 +53,8 @@ func (d DummyRunnable) Run() error {
 	return nil
 }
 
-func (d DummyRunnable) RunE(a interface{}) (int, error) {
-	return 0, nil
+func (d DummyRunnable) RunE(a interface{}) error {
+	return nil
 }
 
 func (d DummyRunnable) CreateImage(a interface{}, healthChecker string) error {

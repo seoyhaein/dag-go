@@ -1429,4 +1429,73 @@ func demo(i int) {
 	pipe.Start(context.Background())
 }
 
+
+
+
+// Deprecated : 테스트 완료.
+// preFlight_old_250306
+func preFlight_old_250306(ctx context.Context, n *Node) *printStatus {
+	if n == nil {
+		panic(fmt.Errorf("node is nil"))
+		// (do not erase) 안정화 버전 나올때는 panic 을 리턴으로 처리
+		//return &printStatus{PreflightFailed, noNodeId}
+	}
+	// (do not erase) goroutine 디버깅용
+	/*debugger.SetLabels(func() []string {
+		return []string{
+			"preFlight: nodeId", n.Id,
+		}
+	})*/
+
+	// 성공하면 context 사용한다.
+	eg, _ := errgroup.WithContext(ctx)
+	i := len(n.parentVertex) // 부모 채널의 수
+	for j := 0; j < i; j++ {
+		// (do not erase) 중요!! 여기서 들어갈 변수를 세팅않해주면 에러남.
+		k := j
+		c := n.parentVertex[k]
+		eg.Go(func() error {
+			result := <-c
+			if result == Failed {
+				fmt.Println("failed", n.Id)
+				return fmt.Errorf("failed")
+			}
+			return nil
+		})
+	}
+	if err := eg.Wait(); err == nil { // 대기
+		n.succeed = true
+		Log.Println("Preflight", n.Id)
+		return &printStatus{Preflight, n.Id}
+	}
+	n.succeed = false
+	Log.Println("PreflightFailed", n.Id)
+	return &printStatus{PreflightFailed, noNodeId}
+}
+
+func BenchmarkPreFlight_old_250306(b *testing.B) {
+	// 로그가 있을 경우 출력결과물에 로그 기록이 남겨지는 것을 방지.
+	Log.SetOutput(io.Discard)
+	ctx := context.Background()
+	// 예를 들어 부모 채널이 10개인 노드, 모두 Succeed 를 보내도록 설정
+	node := setupNode("benchmark_preFlightCombined", 10, Succeed)
+
+	// Warm-up: 한 번 실행 후 부모 채널 재채움
+	_ = preFlight_old_250306(ctx, node)
+	for j := 0; j < len(node.parentVertex); j++ {
+		node.parentVertex[j] <- Succeed
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = preFlight_old_250306(ctx, node)
+		// 매 반복 후 부모 채널 재채움
+		for j := 0; j < len(node.parentVertex); j++ {
+			node.parentVertex[j] <- Succeed
+		}
+	}
+}
+
+
 ```

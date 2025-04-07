@@ -10,8 +10,7 @@ import (
 	"github.com/dlsniper/debugger"
 )
 
-// TODO panic 지우기. 중요 에러일 경우는 빠르게 종료 시키자.
-// TODO 외부 공개 api 가 내부 api 에 들어가 있는 경우 있음. 질서를 잡자.
+// TODO Important flight Method 에서 panic 을 넣은 것은 중요 에러이기때문에 넣어둠. 중요 에러일 경우는 빠르게 종료 시키자. 이 문구 지우지 말것.
 
 type Node struct {
 	Id string
@@ -87,7 +86,7 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 		n.succeed = true
 		// do not erase
 		// fmt.Println 은 표준 출력(stdout)으로 나와서 벤치마크테스트 결과에 나와서 benchstat 이 그 출력 결과물을 파싱하는데 에러가 발생하여서 표준 에러 (stderr) 결과를 출력하도록 바꿈.
-		Log.Println("Preflight succeeded for node", n.Id)
+		Log.Println("Preflight", n.Id)
 		return &printStatus{Preflight, n.Id}
 	}
 
@@ -95,47 +94,6 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 	// do not erase
 	// fmt.Println 은 표준 출력(stdout)으로 나와서 벤치마크테스트 결과에 나와서 benchstat 이 그 출력 결과물을 파싱하는데 에러가 발생하여서 표준 에러 (stderr) 결과를 출력하도록 바꿈.
 	Log.Println("Preflight failed for node", n.Id, "error:", err)
-	return &printStatus{PreflightFailed, noNodeId}
-}
-
-// Deprecated : 테스트 완료.
-// preFlight_old_250306
-func preFlight_old_250306(ctx context.Context, n *Node) *printStatus {
-	if n == nil {
-		panic(fmt.Errorf("node is nil"))
-		// (do not erase) 안정화 버전 나올때는 panic 을 리턴으로 처리
-		//return &printStatus{PreflightFailed, noNodeId}
-	}
-	// (do not erase) goroutine 디버깅용
-	/*debugger.SetLabels(func() []string {
-		return []string{
-			"preFlight: nodeId", n.Id,
-		}
-	})*/
-
-	// 성공하면 context 사용한다.
-	eg, _ := errgroup.WithContext(ctx)
-	i := len(n.parentVertex) // 부모 채널의 수
-	for j := 0; j < i; j++ {
-		// (do not erase) 중요!! 여기서 들어갈 변수를 세팅않해주면 에러남.
-		k := j
-		c := n.parentVertex[k]
-		eg.Go(func() error {
-			result := <-c
-			if result == Failed {
-				fmt.Println("failed", n.Id)
-				return fmt.Errorf("failed")
-			}
-			return nil
-		})
-	}
-	if err := eg.Wait(); err == nil { // 대기
-		n.succeed = true
-		Log.Println("Preflight", n.Id)
-		return &printStatus{Preflight, n.Id}
-	}
-	n.succeed = false
-	Log.Println("PreflightFailed", n.Id)
 	return &printStatus{PreflightFailed, noNodeId}
 }
 
@@ -150,20 +108,18 @@ func inFlight(n *Node) *printStatus {
 	if n.Id == StartNode || n.Id == EndNode {
 		n.succeed = true
 	} else if n.succeed { // 기존에 succeed 가 true 일 때만 실행 진행
-		// TODO Execute 재정의 하거나 새롭게 구현할때 참고해야 함.
-		if _, err := n.Execute(); err != nil {
+		if err := n.Execute(); err != nil {
 			n.succeed = false
 		}
-		// else: n.succeed remains true
 	}
 
-	// 결과에 따라 메시지를 출력하고 printStatus 를 반환
+	// 결과에 따라 Log 를 통해 메시지를 기록하고 printStatus 를 반환
 	if n.succeed {
-		fmt.Println("InFlight", n.Id)
+		Log.Println("InFlight", n.Id)
 		return &printStatus{InFlight, n.Id}
 	}
 
-	fmt.Println("InFlightFailed", n.Id)
+	Log.Println("InFlightFailed", n.Id)
 	return &printStatus{InFlightFailed, n.Id}
 }
 
@@ -172,16 +128,15 @@ func inFlight(n *Node) *printStatus {
 func postFlight(n *Node) *printStatus {
 	if n == nil {
 		panic(fmt.Errorf("node is nil"))
-		// 안정화 버전에서는 panic 대신 적절한 오류 처리를 할 수 있음
 	}
 
 	// 종료 노드(EndNode)인 경우 별도로 처리
 	if n.Id == EndNode {
-		fmt.Println("FlightEnd", n.Id)
+		Log.Println("FlightEnd", n.Id)
 		return &printStatus{FlightEnd, n.Id}
 	}
 
-	// n.succeed 값에 따라 보낼 결과를 결정
+	// n.succeed 값에 따라 결과를 결정
 	var result runningStatus
 	if n.succeed {
 		result = Succeed
@@ -195,7 +150,7 @@ func postFlight(n *Node) *printStatus {
 		close(c)
 	}
 
-	fmt.Println("PostFlight", n.Id)
+	Log.Println("PostFlight", n.Id)
 	return &printStatus{PostFlight, n.Id}
 }
 
@@ -213,20 +168,19 @@ func createNodeWithId(id string) *Node {
 }
 
 // Execute 이것을 작성하면 된다.
-// TODO 7 은 FlightEnd 인지 확인하자. 상수들에 대해서 정리하자.
-func (n *Node) Execute() (r int, err error) {
+func (n *Node) Execute() (err error) {
 	if n.RunCommand != nil {
-		r, err = execute(n)
+		err = execute(n)
 		return
 	}
 	// Container 를 사용하 지않는 다른 명령어를 넣을 경우 여기서 작성하면 된다.
-	return 7, nil
+	return nil
 }
 
 // execute add by seoy
-func execute(this *Node) (int, error) {
-	r, err := this.RunCommand.RunE(this)
-	return r, err
+func execute(this *Node) error {
+	err := this.RunCommand.RunE(this)
+	return err
 }
 
 func checkVisit(visit map[string]bool) bool {
