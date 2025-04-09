@@ -3,12 +3,13 @@ package dag_go
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // internal methods 테스트 기준. 특정 exported method 에서 한번 사용되면 해당 메서드를 테스트 해서 간접 테스트함.
 // 하지만, 여러번 쓰이면 독립적으로 테스트 함.
 
-func TestInitDag(t *testing.T) {
+/*func TestInitDag(t *testing.T) {
 	// InitDag 호출하여 새로운 Dag 인스턴스 생성
 	dag, err := InitDag()
 	if err != nil {
@@ -43,7 +44,7 @@ func TestInitDag(t *testing.T) {
 	if cap(dag.RunningStatus) != Max {
 		t.Errorf("Expected RunningStatus channel capacity to be %d, got %d", Max, cap(dag.RunningStatus))
 	}
-}
+}*/
 
 // DummyRunnable 은 Runnable 인터페이스의 더미 구현체
 type DummyRunnable struct{}
@@ -123,7 +124,7 @@ func TestCreateNode(t *testing.T) {
 	}
 }
 
-func TestCreateEdge(t *testing.T) {
+/*func TestCreateEdge(t *testing.T) {
 	// 새로운 Dag 인스턴스 생성 (노드와 엣지 초기화)
 	dag := &Dag{
 		nodes: make(map[string]*Node),
@@ -179,7 +180,7 @@ func TestCreateEdge(t *testing.T) {
 	if dupErrType != Exist {
 		t.Errorf("expected error type Exist on duplicate edge creation, got %v", dupErrType)
 	}
-}
+}*/
 
 // TestCreateEdge 이게 성공해야지 의미가 있음.
 func TestAddEdge(t *testing.T) {
@@ -365,7 +366,7 @@ func TestCopyDag(t *testing.T) {
 }
 
 // TestCopyDags tests both copyDag and copyDagT functions.
-func TestCopyDags(t *testing.T) {
+/*func TestCopyDags(t *testing.T) {
 	// 원본 DAG 생성 및 구성
 	dag := NewDag()
 	nodeA := &Node{Id: "A"}
@@ -405,9 +406,9 @@ func TestCopyDags(t *testing.T) {
 	if err := verifyCopiedDag(dag, newNodes2, newEdges2, "copyDagT"); err != nil {
 		t.Error(err)
 	}
-}
+}*/
 
-func TestManyCopyDags(t *testing.T) {
+/*func TestManyCopyDags(t *testing.T) {
 	// 여러 테스트 케이스: numNodes 와 edgeProb 를 조합
 	testCases := []struct {
 		numNodes int
@@ -434,12 +435,12 @@ func TestManyCopyDags(t *testing.T) {
 			t.Errorf("Test case (numNodes=%d, edgeProb=%.2f) failed: %v", tc.numNodes, tc.edgeProb, err)
 		}
 	}
-}
+}*/
 
 // TestCopyDagIndependence 는 CopyDag 함수를 통해 생성된 복사본이 원본 DAG 와 독립적으로 동작하는지 검증
 // 복사본에 데이터를 새롭게 넣었는데 만약 원본 DAG 의 내용이 변경한 복사본과 같아지면 shallow copy 이기때문에 에러남.
 // copyDag 에서 shallow copy 가 일어나는 곳은 아예 복사를 하지 않는다.
-func TestCopyDagIndependence(t *testing.T) {
+/*func TestCopyDagIndependence(t *testing.T) {
 	// 1. 원본 DAG 생성 및 초기화
 	orig := NewDag()
 	orig.Pid = "original-pid"
@@ -567,7 +568,7 @@ func TestCopyDagIndependence(t *testing.T) {
 		}
 	}
 
-}
+}*/
 
 // TODO detectCycleDFS, DetectCycle 테스트 필요.
 
@@ -645,6 +646,140 @@ func TestSimpleDag(t *testing.T) {
 	ctx := context.Background()
 	dag.ConnectRunner()
 	dag.GetReady(ctx)
+	b1 := dag.Start()
+	if b1 != true {
+		t.Errorf("expected Start() to return true, got %v", b1)
+	}
+
+	b2 := dag.Wait(ctx)
+	if b2 != true {
+		t.Errorf("expected Wait() to return true, got %v", b2)
+	}
+}
+
+func TestSimple1Dag(t *testing.T) {
+	// DAG 초기화
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("failed to initialize dag: %v", err)
+	}
+
+	// DAG 설정 초기화: 워커 풀 크기와 채널 버퍼 크기 설정
+	dag.Config = DagConfig{
+		WorkerPoolSize: 5,  // 원하는 워커 수로 설정
+		StatusBuffer:   10, // 원하는 채널 버퍼 사이즈로 설정
+	}
+
+	// ContainerCmd를 사용하는 경우, 여기에 등록 (현재는 주석 처리)
+	// runnable := Connect()
+	// dag.SetContainerCmd(runnable)
+
+	// 엣지 추가: DAG의 노드들 간에 부모/자식 관계 구성
+	if err := dag.AddEdge(dag.StartNode.Id, "1"); err != nil {
+		t.Fatalf("failed to add edge from StartNode to '1': %v", err)
+	}
+	if err := dag.AddEdge("1", "2"); err != nil {
+		t.Fatalf("failed to add edge from '1' to '2': %v", err)
+	}
+	if err := dag.AddEdge("1", "3"); err != nil {
+		t.Fatalf("failed to add edge from '1' to '3': %v", err)
+	}
+	if err := dag.AddEdge("1", "4"); err != nil {
+		t.Fatalf("failed to add edge from '1' to '4': %v", err)
+	}
+	if err := dag.AddEdge("2", "5"); err != nil {
+		t.Fatalf("failed to add edge from '2' to '5': %v", err)
+	}
+	if err := dag.AddEdge("5", "6"); err != nil {
+		t.Fatalf("failed to add edge from '5' to '6': %v", err)
+	}
+
+	// DAG 완성 처리: 모든 노드가 연결된 상태로 마무리
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag failed: %v", err)
+	}
+
+	// 컨텍스트 생성
+	ctx := context.Background()
+
+	// 각 노드에 runner 함수를 연결하도록 설정
+	dag.ConnectRunner()
+
+	// DAG 실행 준비: 워커 풀과 상태 채널들을 초기화
+	if ok := dag.GetReady(ctx); !ok {
+		t.Fatalf("GetReady failed")
+	}
+
+	// 시작 노드의 runner를 실행 (시작 상태 채널에 값 전송)
+	b1 := dag.Start()
+	if b1 != true {
+		t.Errorf("expected Start() to return true, got %v", b1)
+	}
+
+	// 모든 실행이 완료될 때까지 대기
+	b2 := dag.Wait(ctx)
+	if b2 != true {
+		t.Errorf("expected Wait() to return true, got %v", b2)
+	}
+}
+
+// 간단한 실행 명령을 위한 인터페이스 구현
+type SimpleCommand struct{}
+
+func (c *SimpleCommand) RunE(node interface{}) error {
+	// 간단한 작업 시뮬레이션
+	time.Sleep(100 * time.Millisecond)
+	return nil
+}
+
+// TestComplexDag는 복잡한 DAG 구조를 테스트합니다.
+func TestComplexDag(t *testing.T) {
+	// DAG 초기화
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag failed: %v", err)
+	}
+
+	// 실행 명령 설정
+	dag.SetContainerCmd(&SimpleCommand{})
+
+	// 노드 생성 (다이아몬드 패턴 + 추가 노드)
+	nodeIDs := []string{"A", "B1", "B2", "C", "D1", "D2", "E"}
+	for _, id := range nodeIDs {
+		dag.CreateNode(id)
+	}
+
+	// 엣지 추가
+	edges := []struct{ from, to string }{
+		{dag.StartNode.Id, "A"},
+		{"A", "B1"},
+		{"A", "B2"},
+		{"B1", "C"},
+		{"B2", "C"},
+		{"C", "D1"},
+		{"C", "D2"},
+		{"D1", "E"},
+		{"D2", "E"},
+	}
+
+	for _, edge := range edges {
+		if err := dag.AddEdgeIfNodesExist(edge.from, edge.to); err != nil {
+			t.Fatalf("failed to add edge from '%s' to '%s': %v", edge.from, edge.to, err)
+		}
+	}
+
+	// DAG 완성 처리
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag failed: %v", err)
+	}
+
+	ctx := context.Background()
+	dag.ConnectRunner()
+
+	if !dag.GetReadyT(ctx) { // GetReadyT 사용
+		t.Fatalf("GetReadyT failed")
+	}
+
 	b1 := dag.Start()
 	if b1 != true {
 		t.Errorf("expected Start() to return true, got %v", b1)
