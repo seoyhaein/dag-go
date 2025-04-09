@@ -9,11 +9,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
 	// (do not erase) goroutine 디버깅용
 	"github.com/dlsniper/debugger"
 )
 
-// NodeStatus는 노드의 현재 상태를 나타냅니다.
+// NodeStatus 는 노드의 현재 상태를 나타냄.
 type NodeStatus int
 
 const (
@@ -21,64 +22,68 @@ const (
 	NodeStatusRunning
 	NodeStatusSucceeded
 	NodeStatusFailed
-	NodeStatusSkipped
+	NodeStatusSkipped // 부모가 실패했을 경우
 )
 
-// Node는 DAG의 기본 구성 요소입니다.
+// Node DAG 의 기본 구성 요소
 type Node struct {
 	Id         string
 	ImageName  string
 	RunCommand Runnable
 
-	children  []*Node // children
-	parent    []*Node // parents
-	parentDag *Dag    // 자신이 소속되어 있는 Dag
+	children  []*Node // 자식 노드 리스트
+	parent    []*Node // 부모 노드 리스트
+	parentDag *Dag    // 자신이 소속된 DAG
 	Commands  string
 
 	childrenVertex []chan runningStatus
 	parentVertex   []chan runningStatus
 	runner         func(ctx context.Context, result chan *printStatus)
 
-	// 동기화를 위한 필드 추가
+	// 동기화를 위한 필드
 	status  NodeStatus
 	succeed bool
 	mu      sync.RWMutex // 공유 상태 보호를 위한 뮤텍스
+
+	// 타임아웃 관련 설정 (각 노드별 설정)
+	Timeout  time.Duration // 타임아웃 시간 (예: 5초 등)
+	bTimeout bool          // true 이면 타임아웃 적용, false 면 무한정 기다림
 }
 
-// SetStatus는 노드의 상태를 안전하게 설정합니다.
+// SetStatus 노드의 상태를 안전하게 설정
 func (n *Node) SetStatus(status NodeStatus) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.status = status
 }
 
-// GetStatus는 노드의 상태를 안전하게 반환합니다.
+// GetStatus 노드의 상태를 안전하게 반환함
 func (n *Node) GetStatus() NodeStatus {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.status
 }
 
-// SetSucceed는 노드의 succeed 필드를 안전하게 설정합니다.
+// SetSucceed 노드의 succeed 필드를 안전하게 설정함
 func (n *Node) SetSucceed(val bool) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.succeed = val
 }
 
-// IsSucceed는 노드의 succeed 필드를 안전하게 반환합니다.
+// IsSucceed 노드의 succeed 필드를 안전하게 반환함
 func (n *Node) IsSucceed() bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.succeed
 }
 
-// CheckParentsStatus는 부모 노드의 상태를 확인합니다.
-// 부모 중 하나라도 실패했으면 false를 반환합니다.
+// CheckParentsStatus 부모 노드의 상태를 확인함
+// 부모 중 하나라도 실패하면 false 를 반환함
 func (n *Node) CheckParentsStatus() bool {
 	for _, parent := range n.parent {
 		if parent.GetStatus() == NodeStatusFailed {
-			// 부모가 실패하면 이 노드를 건너뜀
+			// 부모가 실패하면 이 노드를 건너뜁니다.
 			n.SetStatus(NodeStatusSkipped)
 			return false
 		}
@@ -86,14 +91,14 @@ func (n *Node) CheckParentsStatus() bool {
 	return true
 }
 
-// MarkCompleted는 노드가 완료되었음을 표시하고 부모 DAG에 알립니다.
+// MarkCompleted 노드가 완료되었음을 표시하고 부모 DAG 에 알림
 func (n *Node) MarkCompleted() {
 	if n.parentDag != nil {
 		atomic.AddInt64(&n.parentDag.completedCount, 1)
 	}
 }
 
-// NodeError는 노드 실행 중 발생한 오류를 나타냅니다.
+// NodeError 노드 실행 중 발생한 오류를 나타냄
 type NodeError struct {
 	NodeID string
 	Phase  string
@@ -108,30 +113,20 @@ func (e *NodeError) Unwrap() error {
 	return e.Err
 }
 
-// preFlight는 노드의 실행 전 단계를 처리합니다.
-// 이 함수는 모든 부모 노드의 상태를 확인하고, 모든 부모가 성공적으로 완료되었는지 확인합니다.
-// 컨텍스트 취소 시 적절히 종료됩니다.
-//
-// 매개변수:
-// - ctx: 컨텍스트, 취소 신호를 전파하는 데 사용됩니다.
-// - n: 처리할 노드
-//
-// 반환값:
-// - *printStatus: 노드의 실행 상태
+// preFlight 노드의 실행 전 단계를 처리함
 func preFlight(ctx context.Context, n *Node) *printStatus {
 	if n == nil {
 		return newPrintStatus(PreflightFailed, noNodeId)
 	}
 
-	// 부모 컨텍스트에서 타임아웃 설정
+	// 부모 컨텍스트에서 타임아웃 설정 (30초; 추후 수정 가능)
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// errgroup 과 새로운 컨텍스트 생성
+	// errgroup 새로운 컨텍스트 생성
 	eg, egCtx := errgroup.WithContext(timeoutCtx)
 
-	// Go 1.18 이상에서 사용 가능
-	// 동시 실행 고루틴 수를 제한
+	// 동시 실행 고루틴 수 제한 (Go 1.18 이상)
 	eg.SetLimit(10)
 
 	i := len(n.parentVertex)
@@ -139,9 +134,13 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 
 	for j := 0; j < i; j++ {
 		k := j // closure 캡처 문제 해결
+		// 배열 요소가 nil 인지 확인하는 어설션 (방어적 프로그래밍)
 		c := n.parentVertex[k]
+		if c == nil {
+			Log.Fatalf("preFlight: n.parentVertex[%d] is nil for node %s", k, n.Id)
+		}
 		try = eg.TryGo(func() error {
-			// 각 고루틴에 디버깅 라벨 설정
+			// 디버깅 라벨 설정
 			debugger.SetLabels(func() []string {
 				return []string{
 					"preFlight: nodeId", n.Id,
@@ -168,12 +167,11 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 	err := eg.Wait()
 	if err == nil && try {
 		n.SetSucceed(true)
-		// do not erase
 		Log.Println("Preflight", n.Id)
 		return newPrintStatus(Preflight, n.Id)
 	}
 
-	// 에러 발생 시 구조화된 에러 생성
+	// 에러 발생 시 구조화된 에러 생성 및 로깅
 	if err != nil {
 		nodeErr := &NodeError{
 			NodeID: n.Id,
@@ -184,36 +182,38 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 	}
 
 	n.SetSucceed(false)
-	// do not erase
 	Log.Println("Preflight failed for node", n.Id, "error:", err)
-	return newPrintStatus(PreflightFailed, noNodeId)
+	return newPrintStatus(PreflightFailed, n.Id)
 }
 
 // inFlight는 노드의 실행 단계를 처리합니다.
-// preFlight, inFlight, postFlight 에서의 node 는 같은 노드이다.
-// runner 에서 순차적으로 동작한다.
 func inFlight(n *Node) *printStatus {
 	if n == nil {
 		return newPrintStatus(InFlightFailed, noNodeId)
 	}
 
-	// 시작 노드와 종료 노드는 실행 없이 succeed 를 true 로 설정
+	// 시작 노드와 종료 노드는 별도의 실행 없이 바로 성공 처리
+	// (방어적 설계로 인해 재설정)
 	if n.Id == StartNode || n.Id == EndNode {
 		n.SetSucceed(true)
-	} else if n.IsSucceed() { // IsSucceed() 메서드 사용
-		if err := n.Execute(); err != nil {
-			n.SetSucceed(false)
-			// 에러 발생 시 구조화된 에러 생성
-			nodeErr := &NodeError{
-				NodeID: n.Id,
-				Phase:  "inflight",
-				Err:    err,
+	} else {
+		// 일반 노드의 경우, 이전 단계에서 성공 상태(n.IsSucceed())여야 실행을 시도
+		if n.IsSucceed() {
+			n.SetStatus(NodeStatusRunning)
+			if err := n.Execute(); err != nil {
+				n.SetSucceed(false)
+				nodeErr := &NodeError{
+					NodeID: n.Id,
+					Phase:  "inflight",
+					Err:    err,
+				}
+				Log.Println(nodeErr.Error())
 			}
-			Log.Println(nodeErr.Error())
+		} else {
+			Log.Println("Skipping execution for node", n.Id, "due to previous failure")
 		}
 	}
 
-	// 결과에 따라 Log 를 통해 메시지를 기록하고 printStatus 를 반환
 	if n.IsSucceed() {
 		Log.Println("InFlight", n.Id)
 		return newPrintStatus(InFlight, n.Id)
@@ -223,9 +223,7 @@ func inFlight(n *Node) *printStatus {
 	return newPrintStatus(InFlightFailed, n.Id)
 }
 
-// postFlight는 노드의 실행 후 단계를 처리합니다.
-// preFlight, inFlight, postFlight 에서의 node 는 같은 노드이다.
-// runner 에서 순차적으로 동작한다.
+// postFlight 노드의 실행 후 단계를 처리함
 func postFlight(n *Node) *printStatus {
 	if n == nil {
 		return newPrintStatus(PostFlightFailed, noNodeId)
@@ -237,7 +235,7 @@ func postFlight(n *Node) *printStatus {
 		return newPrintStatus(FlightEnd, n.Id)
 	}
 
-	// n.succeed 값에 따라 결과를 결정
+	// n.succeed 값에 따라 결과 결정
 	var result runningStatus
 	if n.IsSucceed() {
 		result = Succeed
@@ -245,17 +243,20 @@ func postFlight(n *Node) *printStatus {
 		result = Failed
 	}
 
-	// 모든 자식 채널에 result 값을 보내고, 채널을 닫지 않음
-	// 채널 닫기는 DAG 레벨에서 관리
+	// 모든 자식 채널에 result 값을 보냄.
+	// 여기서 bTimeout 플래그에 따라 타임아웃 동작을 결정함
 	for _, c := range n.childrenVertex {
-		select {
-		case c <- result:
-			// 성공적으로 전송됨
-		case <-time.After(5 * time.Second):
-			Log.Printf("Warning: Timeout sending result to channel for node %s", n.Id)
-		default:
-			// 채널이 이미 닫혔거나 가득 찬 경우 처리
-			Log.Printf("Warning: Could not send to channel for node %s", n.Id)
+		if n.bTimeout {
+			// 타임아웃이 활성화된 경우, n.Timeout 만큼 기다린 후 타임아웃 처리
+			select {
+			case c <- result:
+				// 정상 전송
+			case <-time.After(n.Timeout):
+				Log.Printf("Warning: Timeout sending result to channel for node %s", n.Id)
+			}
+		} else {
+			// 타임아웃이 비활성화된 경우, 무한정 대기 (블로킹 전송)
+			c <- result
 		}
 	}
 
@@ -266,7 +267,7 @@ func postFlight(n *Node) *printStatus {
 	return newPrintStatus(PostFlight, n.Id)
 }
 
-// createNode는 새로운 노드를 생성합니다.
+// createNode 새로운 노드를 생성
 func createNode(id string, r Runnable) *Node {
 	return &Node{
 		Id:         id,
@@ -275,7 +276,7 @@ func createNode(id string, r Runnable) *Node {
 	}
 }
 
-// createNodeWithId는 ID만으로 새로운 노드를 생성합니다.
+// createNodeWithId는 ID 만으로 새로운 노드를 생성
 func createNodeWithId(id string) *Node {
 	return &Node{
 		Id:     id,
@@ -283,23 +284,22 @@ func createNodeWithId(id string) *Node {
 	}
 }
 
-// Execute는 노드의 실행 로직을 구현합니다.
+// Execute 노드의 실행 로직을 구현
 func (n *Node) Execute() (err error) {
 	if n.RunCommand != nil {
 		err = execute(n)
 		return
 	}
-	// Container 를 사용하 지않는 다른 명령어를 넣을 경우 여기서 작성하면 된다.
 	return nil
 }
 
-// execute는 RunCommand를 실행합니다.
+// execute RunCommand 실행
 func execute(this *Node) error {
 	err := this.RunCommand.RunE(this)
 	return err
 }
 
-// checkVisit는 모든 노드가 방문되었는지 확인합니다.
+// checkVisit 모든 노드가 방문되었는지 확인함
 func checkVisit(visit map[string]bool) bool {
 	for _, v := range visit {
 		if v == false {
@@ -309,22 +309,20 @@ func checkVisit(visit map[string]bool) bool {
 	return true
 }
 
-// getNode는 노드 맵에서 지정된 ID의 노드를 반환합니다.
+// getNode 노드 맵에서 지정된 ID의 노드를 반환함
 func getNode(s string, ns map[string]*Node) *Node {
 	if len(strings.TrimSpace(s)) == 0 {
 		return nil
 	}
 
-	size := len(ns)
-	if size <= 0 {
+	if len(ns) <= 0 {
 		return nil
 	}
 
-	n := ns[s]
-	return n
+	return ns[s]
 }
 
-// getNextNode는 첫 번째 자식 노드를 가져오고 해당 노드를 삭제합니다.
+// getNextNode 첫 번째 자식 노드를 가져오고 해당 노드를 삭제함
 func getNextNode(n *Node) *Node {
 	if n == nil {
 		return nil
@@ -335,7 +333,6 @@ func getNextNode(n *Node) *Node {
 
 	ch := n.children[0]
 	n.children = append(n.children[:0], n.children[1:]...)
-
 	return ch
 }
 
@@ -346,7 +343,7 @@ var statusPool = sync.Pool{
 	},
 }
 
-// newPrintStatus는 printStatus 객체를 생성합니다.
+// newPrintStatus printStatus 객체를 생성
 func newPrintStatus(status runningStatus, nodeId string) *printStatus {
 	ps := statusPool.Get().(*printStatus)
 	ps.rStatus = status
@@ -354,9 +351,8 @@ func newPrintStatus(status runningStatus, nodeId string) *printStatus {
 	return ps
 }
 
-// releasePrintStatus는 printStatus 객체를 풀에 반환합니다.
+// releasePrintStatus printStatus 객체를 풀에 반환
 func releasePrintStatus(ps *printStatus) {
-	// 필드 초기화
 	ps.rStatus = 0
 	ps.nodeId = ""
 	statusPool.Put(ps)

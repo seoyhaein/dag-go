@@ -410,14 +410,23 @@ func (dag *Dag) CreateNode(id string) *Node {
 	return dag.createNode(id)
 }
 
+func (dag *Dag) CreateNodeWithTimeOut(id string, bTimeOut bool, ti time.Duration) *Node {
+	dag.mu.Lock()
+	defer dag.mu.Unlock()
+	if bTimeOut {
+		return dag.createNodeWithTimeOut(id, ti)
+	}
+	return dag.createNode(id)
+}
+
 // createNode is the internal implementation of CreateNode.
 func (dag *Dag) createNode(id string) *Node {
 	// 이미 해당 id의 노드가 존재하면 nil 반환
 	if _, exists := dag.nodes[id]; exists {
 		return nil
 	}
-	var node *Node
 
+	var node *Node
 	if dag.ContainerCmd != nil {
 		node = createNode(id, dag.ContainerCmd)
 	} else {
@@ -427,8 +436,36 @@ func (dag *Dag) createNode(id string) *Node {
 	node.parentDag = dag
 	dag.nodes[id] = node
 
-	// 노드 카운트 증가
-	atomic.AddInt64(&dag.nodeCount, 1)
+	// StartNode 나 EndNode 가 아닌 경우에만 노드 카운트 증가
+	if id != StartNode && id != EndNode {
+		atomic.AddInt64(&dag.nodeCount, 1)
+	}
+
+	return node
+}
+
+func (dag *Dag) createNodeWithTimeOut(id string, ti time.Duration) *Node {
+	// 이미 해당 id의 노드가 존재하면 nil 반환
+	if _, exists := dag.nodes[id]; exists {
+		return nil
+	}
+
+	var node *Node
+	if dag.ContainerCmd != nil {
+		node = createNode(id, dag.ContainerCmd)
+	} else {
+		node = createNodeWithId(id)
+	}
+
+	node.bTimeout = true
+	node.Timeout = ti
+	node.parentDag = dag
+	dag.nodes[id] = node
+
+	// StartNode 나 EndNode 가 아닌 경우에만 노드 카운트 증가
+	if id != StartNode && id != EndNode {
+		atomic.AddInt64(&dag.nodeCount, 1)
+	}
 
 	return node
 }
@@ -979,7 +1016,7 @@ func (dag *Dag) mergeT(ctx context.Context) {
 	}
 }
 
-// Wait waits for the DAG execution to complete.
+// Wait waits for the DAG execution to complete. // TODO 실패 부분 보다 정확히 해야함. 버그 있음.
 func (dag *Dag) Wait(ctx context.Context) bool {
 	// 채널 닫기는 DAG 종료 시 처리
 	defer dag.closeChannels()
