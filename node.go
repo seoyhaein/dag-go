@@ -36,6 +36,7 @@ type Node struct {
 	parentDag *Dag    // 자신이 소속된 DAG
 	Commands  string
 
+	// TODO 추후 수정. Edge 타입으로 채널 수정하는 것으로 해보자.
 	childrenVertex []chan runningStatus
 	parentVertex   []chan runningStatus
 	runner         func(ctx context.Context, result chan *printStatus)
@@ -186,44 +187,44 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 	return newPrintStatus(PreflightFailed, n.Id)
 }
 
-// inFlight는 노드의 실행 단계를 처리합니다.
+// inFlight 노드의 실행 단계를 처리
 func inFlight(n *Node) *printStatus {
 	if n == nil {
 		return newPrintStatus(InFlightFailed, noNodeId)
 	}
 
-	// 시작 노드와 종료 노드는 별도의 실행 없이 바로 성공 처리
-	// (방어적 설계로 인해 재설정)
 	if n.Id == StartNode || n.Id == EndNode {
 		n.SetSucceed(true)
-	} else {
-		// 일반 노드의 경우, 이전 단계에서 성공 상태(n.IsSucceed())여야 실행을 시도
-		if n.IsSucceed() {
-			n.SetStatus(NodeStatusRunning)
-			if err := n.Execute(); err != nil {
-				n.SetSucceed(false)
-				nodeErr := &NodeError{
-					NodeID: n.Id,
-					Phase:  "inflight",
-					Err:    err,
-				}
-				Log.Println(nodeErr.Error())
-			}
-		} else {
-			Log.Println("Skipping execution for node", n.Id, "due to previous failure")
-		}
+		Log.Println("InFlight (special node)", n.Id)
+		return newPrintStatus(InFlight, n.Id)
 	}
 
+	// 일반 노드의 경우
+	if n.IsSucceed() {
+		n.SetStatus(NodeStatusRunning)
+		if err := n.Execute(); err != nil {
+			n.SetSucceed(false)
+			nodeErr := &NodeError{
+				NodeID: n.Id,
+				Phase:  "inflight",
+				Err:    err,
+			}
+			Log.Println(nodeErr.Error())
+		}
+	} else {
+		Log.Println("Skipping execution for node", n.Id, "due to previous failure")
+	}
+
+	// 최종 결과 판단: 일반 노드의 경우에만 succeed 값을 비교합니다.
 	if n.IsSucceed() {
 		Log.Println("InFlight", n.Id)
 		return newPrintStatus(InFlight, n.Id)
 	}
-
 	Log.Println("InFlightFailed", n.Id)
 	return newPrintStatus(InFlightFailed, n.Id)
 }
 
-// postFlight 노드의 실행 후 단계를 처리함
+// postFlight 노드의 실행 후 단계를 처리함 TODO 예전 코드랑 비교해보자. 흠...
 func postFlight(n *Node) *printStatus {
 	if n == nil {
 		return newPrintStatus(PostFlightFailed, noNodeId)
@@ -242,24 +243,12 @@ func postFlight(n *Node) *printStatus {
 	} else {
 		result = Failed
 	}
-
 	// 모든 자식 채널에 result 값을 보냄.
-	// 여기서 bTimeout 플래그에 따라 타임아웃 동작을 결정함
 	for _, c := range n.childrenVertex {
-		if n.bTimeout {
-			// 타임아웃이 활성화된 경우, n.Timeout 만큼 기다린 후 타임아웃 처리
-			select {
-			case c <- result:
-				// 정상 전송
-			case <-time.After(n.Timeout):
-				Log.Printf("Warning: Timeout sending result to channel for node %s", n.Id)
-			}
-		} else {
-			// 타임아웃이 비활성화된 경우, 무한정 대기 (블로킹 전송)
-			c <- result
-		}
+		c <- result
+		// Important: 이건 dag 의 closeChannels() 에서 채널을 닫아줌. 지우지 말것.
+		// close(c)
 	}
-
 	// 노드 완료 표시
 	n.MarkCompleted()
 
@@ -283,6 +272,8 @@ func createNodeWithId(id string) *Node {
 		status: NodeStatusPending,
 	}
 }
+
+// TODO 생각해보기 timeout 은 여기 들어가야 하는게 맞을듯.
 
 // Execute 노드의 실행 로직을 구현
 func (n *Node) Execute() (err error) {

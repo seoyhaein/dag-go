@@ -1498,4 +1498,52 @@ func BenchmarkPreFlight_old_250306(b *testing.B) {
 }
 
 
+// closeChannels safely closes all channels in the DAG.
+func (dag *Dag) closeChannels() {
+	for _, edge := range dag.Edges {
+		if edge.safeVertex != nil {
+			edge.safeVertex.Close()
+		}
+	}
+
+/*	// 각 노드에서 childrenVertex 와 parentVertex 채널들을 닫음.
+	for _, nd := range dag.nodes {
+		if nd == nil {
+			continue
+		}
+		// childrenVertex 채널 닫기
+		for _, ch := range nd.childrenVertex {
+			if ch != nil {
+				// 이미 닫혔을 가능성을 방어적으로 처리
+				func(c chan runningStatus) {
+					defer func() {
+						if r := recover(); r != nil {
+							// 이미 닫힌 채널일 경우 recover 하여 무시 또는 로깅
+							Log.Warnf("recover from closing children channel: %v", r)
+						}
+					}()
+					// 여기서 닫힌 채널을 닫을려고 하면 panic 이 발생함. 이거슬 위의 recover() 메서드에서 잡아줌.
+					close(c)
+				}(ch)
+			}
+		}
+
+		// parentVertex 채널 닫기
+		for _, ch := range nd.parentVertex {
+			if ch != nil {
+				func(c chan runningStatus) {
+					defer func() {
+						if r := recover(); r != nil {
+							Log.Warnf("recover from closing parent channel: %v", r)
+						}
+					}()
+					// 여기서 닫힌 채널을 닫을려고 하면 panic 이 발생함. 이거슬 위의 recover() 메서드에서 잡아줌.
+					close(c)
+				}(ch)
+			}
+		}
+	}*/
+}
+
+
 ```

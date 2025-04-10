@@ -47,7 +47,7 @@ func TestPreFlight_AllSucceed(t *testing.T) {
 	if ps.nodeId != node.Id {
 		t.Errorf("Expected node id %s, got %s", node.Id, ps.nodeId)
 	}
-	if !node.succeed {
+	if !node.IsSucceed() {
 		t.Error("Expected node.succeed to be true")
 	}
 }
@@ -71,7 +71,7 @@ func TestPreFlight_OneFailed(t *testing.T) {
 	if ps.nodeId != noNodeId {
 		t.Errorf("Expected node id %s, got %s", noNodeId, ps.nodeId)
 	}
-	if node.succeed {
+	if !node.IsSucceed() {
 		t.Error("Expected node.succeed to be false")
 	}
 }
@@ -94,7 +94,7 @@ func TestPreFlightT_AllSucceed(t *testing.T) {
 	if ps.nodeId != node.Id {
 		t.Errorf("Expected node id %s, got %s", node.Id, ps.nodeId)
 	}
-	if !node.succeed {
+	if !node.IsSucceed() {
 		t.Error("Expected node.succeed to be true")
 	}
 }
@@ -117,7 +117,7 @@ func TestPreFlightT_OneFailed(t *testing.T) {
 	if ps.nodeId != noNodeId {
 		t.Errorf("Expected node id %s, got %s", noNodeId, ps.nodeId)
 	}
-	if node.succeed {
+	if !node.IsSucceed() {
 		t.Error("Expected node.succeed to be false")
 	}
 }
@@ -137,7 +137,7 @@ func TestPreFlight_NoParents(t *testing.T) {
 	if ps.nodeId != node.Id {
 		t.Errorf("Expected node id %s, got %s", node.Id, ps.nodeId)
 	}
-	if !node.succeed {
+	if !node.IsSucceed() {
 		t.Error("Expected node.succeed to be true")
 	}
 }
@@ -186,7 +186,7 @@ func TestPreFlight_AllSucceed_WithManyChannels(t *testing.T) {
 	if ps.nodeId != node.Id {
 		t.Errorf("Expected node id %s, got %s", node.Id, ps.nodeId)
 	}
-	if !node.succeed {
+	if !node.IsSucceed() {
 		t.Error("Expected node.succeed to be true")
 	}
 }

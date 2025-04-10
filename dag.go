@@ -10,151 +10,7 @@ import (
 	"time"
 )
 
-// DagConfig는 DAG 구성 옵션을 정의합니다.
-type DagConfig struct {
-	MinChannelBuffer int
-	MaxChannelBuffer int
-	StatusBuffer     int
-	WorkerPoolSize   int
-	DefaultTimeout   time.Duration
-}
-
-// DefaultDagConfig는 기본 DAG 구성을 반환합니다.
-func DefaultDagConfig() DagConfig {
-	return DagConfig{
-		MinChannelBuffer: 5,                // 기본값 증가
-		MaxChannelBuffer: 100,              // 기존과 동일
-		StatusBuffer:     10,               // 기본값 증가
-		WorkerPoolSize:   50,               // 기본 워커 풀 크기
-		DefaultTimeout:   30 * time.Second, // 기본 타임아웃
-	}
-}
-
-// DagOption은 DAG 옵션 함수 타입입니다.
-type DagOption func(*Dag)
-
-// WithTimeout은 타임아웃 설정 옵션을 반환합니다.
-func WithTimeout(timeout time.Duration) DagOption {
-	return func(dag *Dag) {
-		dag.Timeout = timeout
-		dag.bTimeout = true
-	}
-}
-
-// WithChannelBuffers는 채널 버퍼 설정 옵션을 반환합니다.
-func WithChannelBuffers(min, max, status int) DagOption {
-	return func(dag *Dag) {
-		dag.Config.MinChannelBuffer = min
-		dag.Config.MaxChannelBuffer = max
-		dag.Config.StatusBuffer = status
-	}
-}
-
-// WithWorkerPool은 워커 풀 설정 옵션을 반환합니다.
-func WithWorkerPool(size int) DagOption {
-	return func(dag *Dag) {
-		dag.Config.WorkerPoolSize = size
-	}
-}
-
-// SafeChannel은 다중 송신자가 있는 채널을 안전하게 관리하는 구조체입니다.
-type SafeChannel struct {
-	ch     chan runningStatus
-	closed bool
-	mu     sync.RWMutex
-}
-
-// NewSafeChannel은 새로운 SafeChannel을 생성합니다.
-func NewSafeChannel(buffer int) *SafeChannel {
-	return &SafeChannel{
-		ch:     make(chan runningStatus, buffer),
-		closed: false,
-	}
-}
-
-// Send는 채널에 안전하게 값을 보냅니다.
-func (sc *SafeChannel) Send(status runningStatus) bool {
-	sc.mu.RLock()
-	defer sc.mu.RUnlock()
-
-	if sc.closed {
-		return false
-	}
-
-	select {
-	case sc.ch <- status:
-		return true
-	default:
-		return false
-	}
-}
-
-// Close는 채널을 안전하게 닫습니다.
-func (sc *SafeChannel) Close() {
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-
-	if !sc.closed {
-		close(sc.ch)
-		sc.closed = true
-	}
-}
-
-// GetChannel은 기본 채널을 반환합니다.
-func (sc *SafeChannel) GetChannel() chan runningStatus {
-	return sc.ch
-}
-
-// DagWorkerPool은 DAG 워커 풀을 구현합니다.
-type DagWorkerPool struct {
-	workerLimit int
-	taskQueue   chan func()
-	wg          sync.WaitGroup
-}
-
-// NewDagWorkerPool은 새로운 워커 풀을 생성합니다.
-func NewDagWorkerPool(limit int) *DagWorkerPool {
-	pool := &DagWorkerPool{
-		workerLimit: limit,
-		taskQueue:   make(chan func(), limit*2), // 버퍼 크기는 워커 수의 2배
-	}
-
-	// 워커 고루틴 시작
-	for i := 0; i < limit; i++ {
-		pool.wg.Add(1)
-		go func() {
-			defer pool.wg.Done()
-			for task := range pool.taskQueue {
-				task()
-			}
-		}()
-	}
-
-	return pool
-}
-
-// Submit은 작업을 워커 풀에 제출합니다.
-func (p *DagWorkerPool) Submit(task func()) {
-	p.taskQueue <- task
-}
-
-// Close는 워커 풀을 종료합니다.
-func (p *DagWorkerPool) Close() {
-	close(p.taskQueue)
-	p.wg.Wait()
-}
-
-type (
-	runningStatus int
-
-	printStatus struct {
-		rStatus runningStatus
-		nodeId  string
-	}
-)
-
-// createEdgeErrorType 0 if created, 1 if exists, 2 if error.
-type createEdgeErrorType int
+// ==================== 상수 정의 ====================
 
 const (
 	Create createEdgeErrorType = iota
@@ -192,6 +48,46 @@ const (
 
 // It is the node ID when the condition that the node cannot be created.
 const noNodeId = "-1"
+
+// ==================== 타입 정의 ====================
+
+// DagConfig DAG 구성 옵션을 정의함
+type DagConfig struct {
+	MinChannelBuffer int
+	MaxChannelBuffer int
+	StatusBuffer     int
+	WorkerPoolSize   int
+	DefaultTimeout   time.Duration
+}
+
+// DagOption DAG 옵션 함수 타입
+type DagOption func(*Dag)
+
+// SafeChannel 다중 송신자가 있는 채널을 안전하게 관리하는 구조체
+type SafeChannel struct {
+	ch     chan runningStatus
+	closed bool
+	mu     sync.RWMutex
+}
+
+// DagWorkerPool DAG 워커 풀을 구현
+type DagWorkerPool struct {
+	workerLimit int
+	taskQueue   chan func()
+	wg          sync.WaitGroup
+}
+
+type (
+	runningStatus int
+
+	printStatus struct {
+		rStatus runningStatus
+		nodeId  string
+	}
+)
+
+// createEdgeErrorType 0 if created, 1 if exists, 2 if error.
+type createEdgeErrorType int
 
 // Dag (Directed Acyclic Graph) is an acyclic graph, not a cyclic graph.
 // In other words, there is no cyclic cycle in the DAG algorithm, and it has only one direction.
@@ -234,6 +130,19 @@ type Edge struct {
 	safeVertex *SafeChannel // 안전한 채널 추가
 }
 
+// ==================== DAG 기본 및 옵션 함수 ====================
+
+// DefaultDagConfig 기본 DAG 구성을 반환
+func DefaultDagConfig() DagConfig {
+	return DagConfig{
+		MinChannelBuffer: 5,                // 기본값 증가
+		MaxChannelBuffer: 100,              // 기존과 동일
+		StatusBuffer:     10,               // 기본값 증가
+		WorkerPoolSize:   50,               // 기본 워커 풀 크기
+		DefaultTimeout:   30 * time.Second, // 기본 타임아웃
+	}
+}
+
 // NewDag creates a pointer to the Dag structure with default configuration.
 func NewDag() *Dag {
 	return NewDagWithConfig(DefaultDagConfig())
@@ -263,19 +172,6 @@ func NewDagWithOptions(options ...DagOption) *Dag {
 	return dag
 }
 
-// StartDag initializes the DAG with a start node.
-func (dag *Dag) StartDag() (*Dag, error) {
-	dag.mu.Lock()
-	defer dag.mu.Unlock()
-
-	if dag.StartNode = dag.createNode(StartNode); dag.StartNode == nil {
-		return nil, fmt.Errorf("failed to create start node")
-	}
-	// 시작 노드에 필수 채널 추가 (parentVertex 채널 삽입)
-	dag.StartNode.parentVertex = append(dag.StartNode.parentVertex, make(chan runningStatus, dag.Config.MinChannelBuffer))
-	return dag, nil
-}
-
 // InitDag creates and initializes a new DAG.
 func InitDag() (*Dag, error) {
 	dag := NewDag()
@@ -292,6 +188,122 @@ func InitDagWithOptions(options ...DagOption) (*Dag, error) {
 		return nil, fmt.Errorf("failed to run NewDag")
 	}
 	return dag.StartDag()
+}
+
+// WithTimeout 타임아웃 설정 옵션을 반환
+func WithTimeout(timeout time.Duration) DagOption {
+	return func(dag *Dag) {
+		dag.Timeout = timeout
+		dag.bTimeout = true
+	}
+}
+
+// WithChannelBuffers 채널 버퍼 설정 옵션을 반환
+func WithChannelBuffers(min, max, status int) DagOption {
+	return func(dag *Dag) {
+		dag.Config.MinChannelBuffer = min
+		dag.Config.MaxChannelBuffer = max
+		dag.Config.StatusBuffer = status
+	}
+}
+
+// WithWorkerPool 워커 풀 설정 옵션을 반환
+func WithWorkerPool(size int) DagOption {
+	return func(dag *Dag) {
+		dag.Config.WorkerPoolSize = size
+	}
+}
+
+// ==================== SafeChannel 메서드 ====================
+
+// NewSafeChannel 새로운 SafeChannel을 생성
+func NewSafeChannel(buffer int) *SafeChannel {
+	return &SafeChannel{
+		ch:     make(chan runningStatus, buffer),
+		closed: false,
+	}
+}
+
+// Send 채널에 안전하게 값을 보냄
+func (sc *SafeChannel) Send(status runningStatus) bool {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+
+	if sc.closed {
+		return false
+	}
+
+	select {
+	case sc.ch <- status:
+		return true
+	default:
+		return false
+	}
+}
+
+// Close 채널을 안전하게 닫음
+func (sc *SafeChannel) Close() {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+
+	if !sc.closed {
+		close(sc.ch)
+		sc.closed = true
+	}
+}
+
+// GetChannel 기본 채널을 반환
+func (sc *SafeChannel) GetChannel() chan runningStatus {
+	return sc.ch
+}
+
+// ==================== DagWorkerPool 메서드 ====================
+
+// NewDagWorkerPool 새로운 워커 풀을 생성
+func NewDagWorkerPool(limit int) *DagWorkerPool {
+	pool := &DagWorkerPool{
+		workerLimit: limit,
+		taskQueue:   make(chan func(), limit*2), // 버퍼 크기는 워커 수의 2배
+	}
+
+	// 워커 고루틴 시작
+	for i := 0; i < limit; i++ {
+		pool.wg.Add(1)
+		go func() {
+			defer pool.wg.Done()
+			for task := range pool.taskQueue {
+				task()
+			}
+		}()
+	}
+
+	return pool
+}
+
+// Submit 작업을 워커 풀에 보냄
+func (p *DagWorkerPool) Submit(task func()) {
+	p.taskQueue <- task
+}
+
+// Close 워커 풀을 종료
+func (p *DagWorkerPool) Close() {
+	close(p.taskQueue)
+	p.wg.Wait()
+}
+
+// ==================== Dag 메서드 ====================
+
+// StartDag initializes the DAG with a start node.
+func (dag *Dag) StartDag() (*Dag, error) {
+	dag.mu.Lock()
+	defer dag.mu.Unlock()
+
+	if dag.StartNode = dag.createNode(StartNode); dag.StartNode == nil {
+		return nil, fmt.Errorf("failed to create start node")
+	}
+	// 시작 노드에 필수 채널 추가 (parentVertex 채널 삽입)
+	dag.StartNode.parentVertex = append(dag.StartNode.parentVertex, make(chan runningStatus, dag.Config.MinChannelBuffer))
+	return dag, nil
 }
 
 // SetContainerCmd sets the container command for the DAG.
@@ -585,6 +597,7 @@ func (dag *Dag) AddEdgeIfNodesExist(from, to string) error {
 		return logErr(fmt.Errorf("vertex is nil"))
 	}
 
+	// TODO 수정해줘야 함.
 	fromNode.childrenVertex = append(fromNode.childrenVertex, edge.vertex)
 	toNode.parentVertex = append(toNode.parentVertex, edge.vertex)
 	return nil
@@ -705,45 +718,6 @@ func (dag *Dag) visitReset() map[string]bool {
 	return visited
 }
 
-// detectCycleDFS detects cycles using DFS.
-func detectCycleDFS(node *Node, visited, recStack map[string]bool) bool {
-	if recStack[node.Id] {
-		return true
-	}
-	if visited[node.Id] {
-		return false
-	}
-	visited[node.Id] = true
-	recStack[node.Id] = true
-
-	for _, child := range node.children {
-		if detectCycleDFS(child, visited, recStack) {
-			return true
-		}
-	}
-
-	recStack[node.Id] = false
-	return false
-}
-
-// DetectCycle checks if the DAG contains a cycle.
-func DetectCycle(dag *Dag) bool {
-	// copyDag 는 최소 정보만 복사하므로, 사이클 검사에 적합
-	newNodes, _ := copyDag(dag)
-	visited := make(map[string]bool)
-	recStack := make(map[string]bool)
-
-	// 새로 복사된 노드들을 대상으로 DFS 를 수행
-	for _, node := range newNodes {
-		if !visited[node.Id] {
-			if detectCycleDFS(node, visited, recStack) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // ConnectRunner connects runner functions to all nodes.
 func (dag *Dag) ConnectRunner() bool {
 	dag.mu.RLock()
@@ -757,62 +731,6 @@ func (dag *Dag) ConnectRunner() bool {
 		connectRunner(v)
 	}
 	return true
-}
-
-// connectRunner connects a runner function to a node.
-func connectRunner(n *Node) {
-	n.runner = func(ctx context.Context, result chan *printStatus) {
-		defer close(result)
-
-		// 헬퍼 함수: printStatus 값을 복사해 반환
-		copyStatus := func(ps *printStatus) *printStatus {
-			return &printStatus{
-				rStatus: ps.rStatus,
-				nodeId:  ps.nodeId,
-			}
-		}
-
-		// 부모 노드 상태 확인
-		if !n.CheckParentsStatus() {
-			ps := newPrintStatus(PostFlightFailed, n.Id)
-			// 복사본을 만들어 채널에 전달
-			result <- copyStatus(ps)
-			releasePrintStatus(ps)
-			return
-		}
-
-		n.SetStatus(NodeStatusRunning)
-
-		// preFlight 단계 실행
-		ps := preFlight(ctx, n)
-		result <- copyStatus(ps)
-		if ps.rStatus == PreflightFailed {
-			n.SetStatus(NodeStatusFailed)
-			releasePrintStatus(ps)
-			return
-		}
-		releasePrintStatus(ps)
-
-		// inFlight 단계 실행
-		ps = inFlight(n)
-		result <- copyStatus(ps)
-		if ps.rStatus == InFlightFailed {
-			n.SetStatus(NodeStatusFailed)
-			releasePrintStatus(ps)
-			return
-		}
-		releasePrintStatus(ps)
-
-		// postFlight 단계 실행
-		ps = postFlight(n)
-		result <- copyStatus(ps)
-		if ps.rStatus == PostFlightFailed {
-			n.SetStatus(NodeStatusFailed)
-		} else {
-			n.SetStatus(NodeStatusSucceeded)
-		}
-		releasePrintStatus(ps)
-	}
 }
 
 // GetReadyT prepares the DAG for execution with worker pool.
@@ -832,7 +750,7 @@ func (dag *Dag) GetReadyT(ctx context.Context) bool {
 	var chs []chan *printStatus
 
 	for _, v := range dag.nodes {
-		node := v // 변수 캡처 문제 방지
+		nd := v // 변수 캡처 문제 방지
 		ch := make(chan *printStatus, dag.Config.StatusBuffer)
 		chs = append(chs, ch)
 
@@ -844,7 +762,7 @@ func (dag *Dag) GetReadyT(ctx context.Context) bool {
 				close(ch)
 				return
 			default:
-				node.runner(ctx, ch)
+				nd.runner(ctx, ch)
 			}
 		})
 	}
@@ -942,16 +860,6 @@ func (dag *Dag) GetReady(ctx context.Context) bool {
 	return true
 }
 
-// insert inserts a value into a slice at the specified index.
-func insert(a []chan *printStatus, index int, value chan *printStatus) []chan *printStatus {
-	if len(a) == index { // nil or empty slice or after last element
-		return append(a, value)
-	}
-	a = append(a[:index+1], a[index:]...) // index < len(a)
-	a[index] = value
-	return a
-}
-
 // Start initiates the DAG execution.
 func (dag *Dag) Start() bool {
 	n := len(dag.StartNode.parentVertex)
@@ -970,37 +878,8 @@ func (dag *Dag) Start() bool {
 	return true
 }
 
-// fanIn merges multiple channels into one.
-func fanIn(ctx context.Context, channels []chan *printStatus) chan *printStatus {
-	merged := make(chan *printStatus)
-	var wg sync.WaitGroup
-
-	// 각 입력 채널에 대한 고루틴 시작
-	for _, ch := range channels {
-		wg.Add(1)
-		go func(c chan *printStatus) {
-			defer wg.Done()
-			for val := range c {
-				select {
-				case merged <- val:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}(ch)
-	}
-
-	// 모든 입력 채널이 닫히면 출력 채널도 닫음
-	go func() {
-		wg.Wait()
-		close(merged)
-	}()
-
-	return merged
-}
-
 // mergeT merges all status channels using fan-in pattern.
-func (dag *Dag) mergeT(ctx context.Context) {
+func (dag *Dag) merge(ctx context.Context) {
 	defer close(dag.RunningStatus)
 
 	if len(dag.runningStatus) < 1 {
@@ -1038,7 +917,7 @@ func (dag *Dag) Wait(ctx context.Context) bool {
 	defer cancel()
 
 	// 채널 병합
-	go dag.mergeT(waitCtx)
+	go dag.merge(waitCtx)
 
 	for {
 		select {
@@ -1062,6 +941,140 @@ func (dag *Dag) Wait(ctx context.Context) bool {
 			return false
 		}
 	}
+}
+
+// detectCycleDFS detects cycles using DFS.
+func detectCycleDFS(node *Node, visited, recStack map[string]bool) bool {
+	if recStack[node.Id] {
+		return true
+	}
+	if visited[node.Id] {
+		return false
+	}
+	visited[node.Id] = true
+	recStack[node.Id] = true
+
+	for _, child := range node.children {
+		if detectCycleDFS(child, visited, recStack) {
+			return true
+		}
+	}
+
+	recStack[node.Id] = false
+	return false
+}
+
+// DetectCycle checks if the DAG contains a cycle.
+func DetectCycle(dag *Dag) bool {
+	// copyDag 는 최소 정보만 복사하므로, 사이클 검사에 적합
+	newNodes, _ := copyDag(dag)
+	visited := make(map[string]bool)
+	recStack := make(map[string]bool)
+
+	// 새로 복사된 노드들을 대상으로 DFS 를 수행
+	for _, node := range newNodes {
+		if !visited[node.Id] {
+			if detectCycleDFS(node, visited, recStack) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// connectRunner connects a runner function to a node.
+func connectRunner(n *Node) {
+	n.runner = func(ctx context.Context, result chan *printStatus) {
+		defer close(result)
+
+		// 헬퍼 함수: printStatus 값을 복사해 반환
+		copyStatus := func(ps *printStatus) *printStatus {
+			return &printStatus{
+				rStatus: ps.rStatus,
+				nodeId:  ps.nodeId,
+			}
+		}
+
+		// 부모 노드 상태 확인
+		if !n.CheckParentsStatus() {
+			ps := newPrintStatus(PostFlightFailed, n.Id)
+			// 복사본을 만들어 채널에 전달
+			result <- copyStatus(ps)
+			releasePrintStatus(ps)
+			return
+		}
+
+		n.SetStatus(NodeStatusRunning)
+
+		// preFlight 단계 실행
+		ps := preFlight(ctx, n)
+		result <- copyStatus(ps)
+		if ps.rStatus == PreflightFailed {
+			n.SetStatus(NodeStatusFailed)
+			releasePrintStatus(ps)
+			return
+		}
+		releasePrintStatus(ps)
+
+		// inFlight 단계 실행
+		ps = inFlight(n)
+		result <- copyStatus(ps)
+		if ps.rStatus == InFlightFailed {
+			n.SetStatus(NodeStatusFailed)
+			releasePrintStatus(ps)
+			return
+		}
+		releasePrintStatus(ps)
+
+		// postFlight 단계 실행
+		ps = postFlight(n)
+		result <- copyStatus(ps)
+		if ps.rStatus == PostFlightFailed {
+			n.SetStatus(NodeStatusFailed)
+		} else {
+			n.SetStatus(NodeStatusSucceeded)
+		}
+		releasePrintStatus(ps)
+	}
+}
+
+// insert inserts a value into a slice at the specified index.
+func insert(a []chan *printStatus, index int, value chan *printStatus) []chan *printStatus {
+	if len(a) == index { // nil or empty slice or after last element
+		return append(a, value)
+	}
+	a = append(a[:index+1], a[index:]...) // index < len(a)
+	a[index] = value
+	return a
+}
+
+// fanIn merges multiple channels into one.
+func fanIn(ctx context.Context, channels []chan *printStatus) chan *printStatus {
+	merged := make(chan *printStatus)
+	var wg sync.WaitGroup
+
+	// 각 입력 채널에 대한 고루틴 시작
+	for _, ch := range channels {
+		wg.Add(1)
+		go func(c chan *printStatus) {
+			defer wg.Done()
+			for val := range c {
+				select {
+				case merged <- val:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}(ch)
+	}
+
+	// 모든 입력 채널이 닫히면 출력 채널도 닫음
+	go func() {
+		wg.Wait()
+		close(merged)
+	}()
+
+	return merged
 }
 
 // min returns the minimum of two integers.
