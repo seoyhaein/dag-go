@@ -33,13 +33,13 @@ type Node struct {
 
 	children  []*Node // 자식 노드 리스트
 	parent    []*Node // 부모 노드 리스트
-	parentDag *Dag    // 자신이 소속된 DAG
+	parentDag *Dag    // 자신이 속한 DAG
 	Commands  string
 
-	// TODO 추후 수정. Edge 타입으로 채널 수정하는 것으로 해보자.
-	childrenVertex []chan runningStatus
-	parentVertex   []chan runningStatus
-	runner         func(ctx context.Context, result chan *printStatus)
+	// childrenVertex 와 parentVertex 를 SafeChannel 슬라이스로 관리
+	childrenVertex []*SafeChannel[runningStatus]
+	parentVertex   []*SafeChannel[runningStatus]
+	runner         func(ctx context.Context, result *SafeChannel[*printStatus])
 
 	// 동기화를 위한 필드
 	status  NodeStatus
@@ -124,20 +124,18 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// errgroup 새로운 컨텍스트 생성
+	// errgroup 및 새로운 컨텍스트 생성
 	eg, egCtx := errgroup.WithContext(timeoutCtx)
-
-	// 동시 실행 고루틴 수 제한 (Go 1.18 이상)
-	eg.SetLimit(10)
+	eg.SetLimit(10) // 동시 실행 고루틴 수 제한
 
 	i := len(n.parentVertex)
 	var try bool = true
 
 	for j := 0; j < i; j++ {
 		k := j // closure 캡처 문제 해결
-		// 배열 요소가 nil 인지 확인하는 어설션 (방어적 프로그래밍)
-		c := n.parentVertex[k]
-		if c == nil {
+		// SafeChannel 포인터를 가져옴. nil 체크 수행.
+		sc := n.parentVertex[k]
+		if sc == nil {
 			Log.Fatalf("preFlight: n.parentVertex[%d] is nil for node %s", k, n.Id)
 		}
 		try = eg.TryGo(func() error {
@@ -149,13 +147,13 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 				}
 			})
 			select {
-			case result := <-c:
+			// 내부 채널을 통해 값을 읽어온다.
+			case result := <-sc.GetChannel():
 				if result == Failed {
 					return fmt.Errorf("node %s: parent channel returned Failed", n.Id)
 				}
 				return nil
 			case <-egCtx.Done():
-				// 컨텍스트 취소 시 에러 반환
 				return egCtx.Err()
 			}
 		})
@@ -164,7 +162,6 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 		}
 	}
 
-	// 모든 고루틴이 종료될 때까지 대기
 	err := eg.Wait()
 	if err == nil && try {
 		n.SetSucceed(true)
@@ -224,7 +221,7 @@ func inFlight(n *Node) *printStatus {
 	return newPrintStatus(InFlightFailed, n.Id)
 }
 
-// postFlight 노드의 실행 후 단계를 처리함 TODO 예전 코드랑 비교해보자. 흠...
+// postFlight 노드의 실행 후 단계를 처리함
 func postFlight(n *Node) *printStatus {
 	if n == nil {
 		return newPrintStatus(PostFlightFailed, noNodeId)
@@ -243,12 +240,14 @@ func postFlight(n *Node) *printStatus {
 	} else {
 		result = Failed
 	}
-	// 모든 자식 채널에 result 값을 보냄.
-	for _, c := range n.childrenVertex {
-		c <- result
-		// Important: 이건 dag 의 closeChannels() 에서 채널을 닫아줌. 지우지 말것.
-		// close(c)
+
+	// 모든 자식 채널(안전 채널)에 result 값을 보냄.
+	// SafeChannel 의 Send 메서드를 이용해 값 전송.
+	for _, sc := range n.childrenVertex {
+		sc.Send(result)
+		// 채널 닫기는 DAG 의 closeChannels() 등에서 관리함.
 	}
+
 	// 노드 완료 표시
 	n.MarkCompleted()
 
