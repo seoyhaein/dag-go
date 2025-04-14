@@ -11,9 +11,8 @@ type (
 
 const (
 	AddEdge ErrorType = iota
-	AddEdgeFromXmlNode
-	AddEdgeFromXmlNodeToStartNode
-	AddEdgeFromXmlNodeToEndNode
+	StartDag
+	AddEdgeIfNodesExist
 	addEndNode
-	finishDag
+	FinishDag
 )

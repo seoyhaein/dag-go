@@ -2,14 +2,14 @@ package dag_go
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
+	"strings"
 	"testing"
 	"time"
 )
 
-// internal methods 테스트 기준. 특정 exported method 에서 한번 사용되면 해당 메서드를 테스트 해서 간접 테스트함.
-// 하지만, 여러번 쓰이면 독립적으로 테스트 함.
-
-/*func TestInitDag(t *testing.T) {
+func TestInitDag(t *testing.T) {
 	// InitDag 호출하여 새로운 Dag 인스턴스 생성
 	dag, err := InitDag()
 	if err != nil {
@@ -25,40 +25,41 @@ import (
 	}
 
 	// StartNode 의 Id가 올바르게 설정되었는지 확인 (예: StartNode 상수와 일치하는지)
-	if dag.StartNode.Id != StartNode {
-		t.Errorf("Expected StartNode Id to be %s, got %s", StartNode, dag.StartNode.Id)
+	if dag.StartNode.ID != StartNode {
+		t.Errorf("Expected StartNode Id to be %s, got %s", StartNode, dag.StartNode.ID)
 	}
 
-	// StartNode 에 parentVertex 채널이 추가되었는지 확인
+	// StartNode 의 parentVertex 에 SafeChannel 이 추가되었는지 확인
 	if len(dag.StartNode.parentVertex) == 0 {
 		t.Error("StartNode's parentVertex channel is not set")
 	} else {
-		// 채널이 올바른 용량으로 생성되었는지 확인
-		ch := dag.StartNode.parentVertex[0]
-		if cap(ch) != Min {
-			t.Errorf("Expected parentVertex channel capacity to be %d, got %d", Min, cap(ch))
+		// parentVertex 의 갯수가 정확히 1개인지 검사, 1개로 설정함.
+		if len(dag.StartNode.parentVertex) != 1 {
+			t.Errorf("Expected StartNode.parentVertex count to be 1, got %d", len(dag.StartNode.parentVertex))
+		}
+
+		// 첫 번째 SafeChannel 의 내부 채널 용량을 확인
+		safeCh := dag.StartNode.parentVertex[0]
+		if cap(safeCh.GetChannel()) != dag.Config.MinChannelBuffer {
+			t.Errorf("Expected parentVertex channel capacity to be %d, got %d", dag.Config.MinChannelBuffer, cap(safeCh.GetChannel()))
 		}
 	}
 
-	// RunningStatus 채널의 용량도 검사
-	if cap(dag.RunningStatus) != Max {
-		t.Errorf("Expected RunningStatus channel capacity to be %d, got %d", Max, cap(dag.RunningStatus))
+	// NodesResult 채널(노드 결과 SafeChannel)의 용량 검사
+	if dag.NodesResult == nil {
+		t.Error("RunningStatus is nil")
+	} else {
+		if cap(dag.NodesResult.GetChannel()) != dag.Config.MaxChannelBuffer {
+			t.Errorf("Expected RunningStatus channel capacity to be %d, got %d", dag.Config.MaxChannelBuffer, cap(dag.NodesResult.GetChannel()))
+		}
 	}
-}*/
+}
 
 // DummyRunnable 은 Runnable 인터페이스의 더미 구현체
 type DummyRunnable struct{}
 
 // DummyRunnable 이 Runnable 인터페이스를 구현하도록 필요한 메서드들을 정의
-func (d DummyRunnable) Run() error {
-	return nil
-}
-
-func (d DummyRunnable) RunE(a interface{}) error {
-	return nil
-}
-
-func (d DummyRunnable) CreateImage(a interface{}, healthChecker string) error {
+func (d DummyRunnable) RunE(_ interface{}) error {
 	return nil
 }
 
@@ -73,8 +74,8 @@ func TestCreateNode(t *testing.T) {
 	if node == nil {
 		t.Fatalf("expected node to be created, got nil")
 	}
-	if node.Id != id {
-		t.Errorf("expected node id to be %s, got %s", id, node.Id)
+	if node.ID != id {
+		t.Errorf("expected node id to be %s, got %s", id, node.ID)
 	}
 	// ContainerCmd 가 nil 이면 createNodeWithId 를 호출하므로 RunCommand 는 nil 이어야 함.
 	if node.RunCommand != nil {
@@ -107,8 +108,8 @@ func TestCreateNode(t *testing.T) {
 	if node2 == nil {
 		t.Fatalf("expected node2 to be created, got nil")
 	}
-	if node2.Id != id2 {
-		t.Errorf("expected node2 id to be %s, got %s", id2, node2.Id)
+	if node2.ID != id2 {
+		t.Errorf("expected node2 id to be %s, got %s", id2, node2.ID)
 	}
 	// ContainerCmd 가 non-nil 이면 createNode(id, ContainerCmd)를 호출하므로, RunCommand 가 설정되어 있어야 함.
 	if node2.RunCommand == nil {
@@ -118,54 +119,56 @@ func TestCreateNode(t *testing.T) {
 	if _, ok := node2.RunCommand.(DummyRunnable); !ok {
 		t.Errorf("expected RunCommand to be of type DummyRunnable, got %T", node2.RunCommand)
 	}
-	// 동일한 id로 다시 생성 시 nil을 반환하는지 검증
+	// 동일한 id로 다시 생성 시 nil 을 반환하는지 검증
 	if dup2 := dag2.CreateNode(id2); dup2 != nil {
 		t.Errorf("expected duplicate createNode call to return nil, got %v", dup2)
 	}
 }
 
-/*func TestCreateEdge(t *testing.T) {
+func TestCreateEdge(t *testing.T) {
 	// 새로운 Dag 인스턴스 생성 (노드와 엣지 초기화)
 	dag := &Dag{
 		nodes: make(map[string]*Node),
 		Edges: []*Edge{},
 	}
+	// 기본 구성 설정
+	dag.Config = DefaultDagConfig()
 
-	// Case 1: parentId가 빈 문자열인 경우 -> Fault 반환
+	// Case 1: parentID가 빈 문자열인 경우 -> Fault 반환
 	edge, errType := dag.createEdge("", "child")
 	if edge != nil {
-		t.Errorf("expected nil edge when parentId is empty, got %+v", edge)
+		t.Errorf("expected nil edge when parentID is empty, got %+v", edge)
 	}
 	if errType != Fault {
-		t.Errorf("expected error type Fault when parentId is empty, got %v", errType)
+		t.Errorf("expected error type Fault when parentID is empty, got %v", errType)
 	}
 
-	// Case 2: childId가 빈 문자열인 경우 -> Fault 반환
+	// Case 2: childID가 빈 문자열인 경우 -> Fault 반환
 	edge, errType = dag.createEdge("parent", "")
 	if edge != nil {
-		t.Errorf("expected nil edge when childId is empty, got %+v", edge)
+		t.Errorf("expected nil edge when childID is empty, got %+v", edge)
 	}
 	if errType != Fault {
-		t.Errorf("expected error type Fault when childId is empty, got %v", errType)
+		t.Errorf("expected error type Fault when childID is empty, got %v", errType)
 	}
 
 	// Case 3: 정상적인 엣지 생성
-	parentId := "p1"
-	childId := "c1"
-	edge, errType = dag.createEdge(parentId, childId)
+	parentID := "p1"
+	childID := "c1"
+	edge, errType = dag.createEdge(parentID, childID)
 	if edge == nil {
 		t.Fatalf("expected edge to be created, got nil")
 	}
 	if errType != Create {
 		t.Errorf("expected error type Create, got %v", errType)
 	}
-	if edge.parentId != parentId || edge.childId != childId {
-		t.Errorf("edge fields mismatch: got parentId=%s, childId=%s; expected parentId=%s, childId=%s",
-			edge.parentId, edge.childId, parentId, childId)
+	if edge.parentID != parentID || edge.childID != childID {
+		t.Errorf("edge fields mismatch: got parentID=%s, childID=%s; expected parentID=%s, childID=%s",
+			edge.parentID, edge.childID, parentID, childID)
 	}
-	// vertex 채널의 용량(capacity)이 Min과 동일한지 확인
-	if cap(edge.vertex) != Min {
-		t.Errorf("expected vertex channel capacity to be %d, got %d", Min, cap(edge.vertex))
+	// safeVertex 채널의 용량이 dag.Config.MinChannelBuffer 와 일치하는지 확인
+	if cap(edge.safeVertex.GetChannel()) != dag.Config.MinChannelBuffer {
+		t.Errorf("expected vertex channel capacity to be %d, got %d", dag.Config.MinChannelBuffer, cap(edge.safeVertex.GetChannel()))
 	}
 	// dag.Edges 에 엣지가 추가되었는지 확인
 	if len(dag.Edges) != 1 {
@@ -173,14 +176,14 @@ func TestCreateNode(t *testing.T) {
 	}
 
 	// Case 4: 중복된 엣지 생성 시도 -> nil 과 Exist 에러 반환
-	dupEdge, dupErrType := dag.createEdge(parentId, childId)
+	dupEdge, dupErrType := dag.createEdge(parentID, childID)
 	if dupEdge != nil {
 		t.Errorf("expected duplicate edge creation to return nil, got %+v", dupEdge)
 	}
 	if dupErrType != Exist {
 		t.Errorf("expected error type Exist on duplicate edge creation, got %v", dupErrType)
 	}
-}*/
+}
 
 // TestCreateEdge 이게 성공해야지 의미가 있음.
 func TestAddEdge(t *testing.T) {
@@ -229,7 +232,7 @@ func TestAddEdge(t *testing.T) {
 	// node1의 자식 리스트에 node2가 포함되어 있는지 확인
 	found := false
 	for _, child := range node1.children {
-		if child.Id == "node2" {
+		if child.ID == "node2" {
 			found = true
 			break
 		}
@@ -241,7 +244,7 @@ func TestAddEdge(t *testing.T) {
 	// node2의 부모 리스트에 node1이 포함되어 있는지 확인
 	found = false
 	for _, parent := range node2.parent {
-		if parent.Id == "node1" {
+		if parent.ID == "node1" {
 			found = true
 			break
 		}
@@ -271,23 +274,17 @@ func TestAddEdge(t *testing.T) {
 	}
 }
 
-// dag.ConnectRunner() 테스트 해야 하는데 여기서 부터는 Node 먼저 테스트 해야함.
-
-// TestCopyDag 는 원본 DAG 에서 사이클 판별에 필요한 최소 정보를 복사하는 copyDagT(apiTest.go 참고) 함수의 동작을 검증
-// 이 테스트 케이를 가지고 copyDagT 와 copyDag 를 검사할 수 있음.
+// TestCopyDag 는 copyDag 함수가 노드 ID, 부모/자식 구조를 올바르게 복사하는지 검증하는 단위 테스트입니다.
 func TestCopyDag(t *testing.T) {
 	// 1. 원본 DAG 생성 및 노드/간선 구성
 	dag := NewDag()
 
-	// 노드 생성
-	nodeA := &Node{Id: "A"}
-	nodeB := &Node{Id: "B"}
-	nodeC := &Node{Id: "C"}
-	nodeD := &Node{Id: "D"}
+	nodeA := &Node{ID: "A"}
+	nodeB := &Node{ID: "B"}
+	nodeC := &Node{ID: "C"}
+	nodeD := &Node{ID: "D"}
 
-	// TODO 일단 좀더 복잡한 dag 를 만들어 보는 것도 한번 생각해보자.
-	// 부모/자식 관계 설정:
-	// A -> B, A -> C, B -> D, C -> D
+	// 부모/자식 관계 설정
 	nodeA.children = []*Node{nodeB, nodeC}
 	nodeB.parent = []*Node{nodeA}
 	nodeB.children = []*Node{nodeD}
@@ -295,22 +292,21 @@ func TestCopyDag(t *testing.T) {
 	nodeC.children = []*Node{nodeD}
 	nodeD.parent = []*Node{nodeB, nodeC}
 
-	// 원본 DAG 에 노드 등록
 	dag.nodes = map[string]*Node{
-		nodeA.Id: nodeA,
-		nodeB.Id: nodeB,
-		nodeC.Id: nodeC,
-		nodeD.Id: nodeD,
+		nodeA.ID: nodeA,
+		nodeB.ID: nodeB,
+		nodeC.ID: nodeC,
+		nodeD.ID: nodeD,
 	}
 
-	// 간선 생성: A->B, A->C, B->D, C->D
-	edgeAB := &Edge{parentId: "A", childId: "B"}
-	edgeAC := &Edge{parentId: "A", childId: "C"}
-	edgeBD := &Edge{parentId: "B", childId: "D"}
-	edgeCD := &Edge{parentId: "C", childId: "D"}
-	dag.Edges = []*Edge{edgeAB, edgeAC, edgeBD, edgeCD}
+	dag.Edges = []*Edge{
+		{parentID: "A", childID: "B"},
+		{parentID: "A", childID: "C"},
+		{parentID: "B", childID: "D"},
+		{parentID: "C", childID: "D"},
+	}
 
-	// 2. copyDagT 함수 호출
+	// 2. copyDag 호출
 	newNodes, newEdges := copyDag(dag)
 
 	// 3. 노드 수 검증
@@ -318,36 +314,21 @@ func TestCopyDag(t *testing.T) {
 		t.Errorf("expected %d nodes, got %d", len(dag.nodes), len(newNodes))
 	}
 
-	// 4. 각 노드의 ID와 부모/자식 관계 검증
+	// 4. 각 노드 ID와 관계 검증
 	for id, origNode := range dag.nodes {
 		newNode, ok := newNodes[id]
 		if !ok {
-			t.Errorf("node with id %s missing in newNodes", id)
+			t.Errorf("node with ID %s missing in newNodes", id)
 			continue
 		}
-		// ID 비교
-		if newNode.Id != origNode.Id {
-			t.Errorf("expected node id %s, got %s", origNode.Id, newNode.Id)
+		if newNode.ID != origNode.ID {
+			t.Errorf("expected node ID %s, got %s", origNode.ID, newNode.ID)
 		}
-		// 부모 수 비교 및 부모 ID 검증
 		if len(newNode.parent) != len(origNode.parent) {
 			t.Errorf("node %s: expected %d parents, got %d", id, len(origNode.parent), len(newNode.parent))
-		} else {
-			for i, p := range newNode.parent {
-				if p.Id != origNode.parent[i].Id {
-					t.Errorf("node %s: expected parent %s, got %s", id, origNode.parent[i].Id, p.Id)
-				}
-			}
 		}
-		// 자식 수 비교 및 자식 ID 검증
 		if len(newNode.children) != len(origNode.children) {
 			t.Errorf("node %s: expected %d children, got %d", id, len(origNode.children), len(newNode.children))
-		} else {
-			for i, c := range newNode.children {
-				if c.Id != origNode.children[i].Id {
-					t.Errorf("node %s: expected child %s, got %s", id, origNode.children[i].Id, c.Id)
-				}
-			}
 		}
 	}
 
@@ -357,24 +338,22 @@ func TestCopyDag(t *testing.T) {
 	}
 	for i, origEdge := range dag.Edges {
 		newEdge := newEdges[i]
-		if newEdge.parentId != origEdge.parentId || newEdge.childId != origEdge.childId {
-			t.Errorf("edge %d: expected parent %s->child %s, got parent %s->child %s",
-				i, origEdge.parentId, origEdge.childId, newEdge.parentId, newEdge.childId)
+		if newEdge.parentID != origEdge.parentID || newEdge.childID != origEdge.childID {
+			t.Errorf("edge %d: expected %s -> %s, got %s -> %s",
+				i, origEdge.parentID, origEdge.childID, newEdge.parentID, newEdge.childID)
 		}
 	}
-
 }
 
-// TestCopyDags tests both copyDag and copyDagT functions.
-/*func TestCopyDags(t *testing.T) {
-	// 원본 DAG 생성 및 구성
+// TestCopyDags 는 verifyCopiedDag 유틸리티를 사용하여 copyDag 의 동작을 검증합니다.
+func TestCopyDags(t *testing.T) {
 	dag := NewDag()
-	nodeA := &Node{Id: "A"}
-	nodeB := &Node{Id: "B"}
-	nodeC := &Node{Id: "C"}
-	nodeD := &Node{Id: "D"}
 
-	// 부모/자식 관계 설정: A -> B, A -> C, B -> D, C -> D
+	nodeA := &Node{ID: "A"}
+	nodeB := &Node{ID: "B"}
+	nodeC := &Node{ID: "C"}
+	nodeD := &Node{ID: "D"}
+
 	nodeA.children = []*Node{nodeB, nodeC}
 	nodeB.parent = []*Node{nodeA}
 	nodeB.children = []*Node{nodeD}
@@ -383,32 +362,27 @@ func TestCopyDag(t *testing.T) {
 	nodeD.parent = []*Node{nodeB, nodeC}
 
 	dag.nodes = map[string]*Node{
-		"A": nodeA,
-		"B": nodeB,
-		"C": nodeC,
-		"D": nodeD,
+		nodeA.ID: nodeA,
+		nodeB.ID: nodeB,
+		nodeC.ID: nodeC,
+		nodeD.ID: nodeD,
 	}
 
-	edgeAB := &Edge{parentId: "A", childId: "B"}
-	edgeAC := &Edge{parentId: "A", childId: "C"}
-	edgeBD := &Edge{parentId: "B", childId: "D"}
-	edgeCD := &Edge{parentId: "C", childId: "D"}
-	dag.Edges = []*Edge{edgeAB, edgeAC, edgeBD, edgeCD}
-
-	// copyDag 함수 테스트
-	newNodes1, newEdges1 := copyDag(dag)
-	if err := verifyCopiedDag(dag, newNodes1, newEdges1, "copyDag"); err != nil {
-		t.Error(err)
+	dag.Edges = []*Edge{
+		{parentID: "A", childID: "B"},
+		{parentID: "A", childID: "C"},
+		{parentID: "B", childID: "D"},
+		{parentID: "C", childID: "D"},
 	}
 
-	// copyDagT 함수 테스트
-	newNodes2, newEdges2 := copyDagT(dag)
-	if err := verifyCopiedDag(dag, newNodes2, newEdges2, "copyDagT"); err != nil {
-		t.Error(err)
-	}
-}*/
+	newNodes, newEdges := copyDag(dag)
 
-/*func TestManyCopyDags(t *testing.T) {
+	if err := verifyCopiedDag(dag, newNodes, newEdges, "copyDag"); err != nil {
+		t.Errorf("verifyCopiedDag failed: %v", err)
+	}
+}
+
+func TestManyCopyDags(t *testing.T) {
 	// 여러 테스트 케이스: numNodes 와 edgeProb 를 조합
 	testCases := []struct {
 		numNodes int
@@ -435,27 +409,27 @@ func TestCopyDag(t *testing.T) {
 			t.Errorf("Test case (numNodes=%d, edgeProb=%.2f) failed: %v", tc.numNodes, tc.edgeProb, err)
 		}
 	}
-}*/
+}
 
 // TestCopyDagIndependence 는 CopyDag 함수를 통해 생성된 복사본이 원본 DAG 와 독립적으로 동작하는지 검증
 // 복사본에 데이터를 새롭게 넣었는데 만약 원본 DAG 의 내용이 변경한 복사본과 같아지면 shallow copy 이기때문에 에러남.
 // copyDag 에서 shallow copy 가 일어나는 곳은 아예 복사를 하지 않는다.
-/*func TestCopyDagIndependence(t *testing.T) {
+//
+//nolint:funlen // 이 테스트는 길지만 의도적으로 유지함
+func TestCopyDagIndependence(t *testing.T) {
 	// 1. 원본 DAG 생성 및 초기화
 	orig := NewDag()
-	orig.Pid = "original-pid"
-	orig.Id = "orig-id"
+	orig.ID = "orig-id"
 	orig.validated = true
-	orig.Timeout = 10
+	orig.Timeout = 10 * time.Second
 	orig.bTimeout = false
-
-	orig.ContainerCmd = nil // shallow copy 라서 pass
+	orig.ContainerCmd = nil // shallow copy라서 pass
 
 	// 노드 생성
-	nodeA := &Node{Id: "A", ImageName: "imgA", Commands: "cmdA", succeed: true}
-	nodeB := &Node{Id: "B", ImageName: "imgB", Commands: "cmdB", succeed: false}
+	nodeA := &Node{ID: "A", ImageName: "imgA", Commands: "cmdA", succeed: true}
+	nodeB := &Node{ID: "B", ImageName: "imgB", Commands: "cmdB", succeed: false}
 
-	// 관계 설정: A -> B
+	// 부모/자식 관계 설정: A -> B
 	nodeA.children = []*Node{nodeB}
 	nodeB.parent = []*Node{nodeA}
 
@@ -466,7 +440,11 @@ func TestCopyDag(t *testing.T) {
 	}
 
 	// 간선 생성: A -> B
-	edgeAB := &Edge{parentId: "A", childId: "B"}
+	edgeAB := &Edge{
+		parentID: "A",
+		childID:  "B",
+		// CopyDag 에서는 vertex 등의 추가 정보는 복사하지 않으므로 생략함.
+	}
 	orig.Edges = []*Edge{edgeAB}
 
 	// 2. CopyDag 함수를 호출하여 복사본 생성
@@ -476,23 +454,16 @@ func TestCopyDag(t *testing.T) {
 	}
 
 	// 3. DAG 필드 독립성 검증
-	// (a) Pid 검증
-	originalPid := orig.Pid
-	newDag.Pid = "modified-pid"
-	if orig.Pid == "modified-pid" {
-		t.Error("Modifying newDag.Pid affected original.Pid")
-	}
-	newDag.Pid = originalPid
 
-	// (b) Id 검증
-	originalId := orig.Id
-	newDag.Id = "modified-dag-id"
-	if orig.Id == "modified-dag-id" {
+	// (a) Id 검증
+	originalID := orig.ID
+	newDag.ID = "modified-dag-id"
+	if orig.ID == "modified-dag-id" {
 		t.Error("Modifying newDag.Id affected original.Id")
 	}
-	newDag.Id = originalId
+	newDag.ID = originalID
 
-	// (c) validated, Timeout, bTimeout 검증
+	// (b) validated, Timeout, bTimeout 검증
 	origValidated := orig.validated
 	newDag.validated = !origValidated
 	if orig.validated == newDag.validated {
@@ -501,7 +472,7 @@ func TestCopyDag(t *testing.T) {
 	newDag.validated = origValidated
 
 	origTimeout := orig.Timeout
-	newDag.Timeout = origTimeout + 100
+	newDag.Timeout = origTimeout + 100*time.Millisecond
 	if orig.Timeout == newDag.Timeout {
 		t.Error("Modifying newDag.Timeout affected original.Timeout")
 	}
@@ -515,7 +486,6 @@ func TestCopyDag(t *testing.T) {
 	newDag.bTimeout = origBTimeout
 
 	// 4. 노드 독립성 검증
-	// 여러 노드에 대해 각 필드를 변경한 후 원본이 그대로 유지되는지 확인합니다.
 	for key, origNode := range orig.nodes {
 		newNode, ok := newDag.nodes[key]
 		if !ok {
@@ -523,15 +493,15 @@ func TestCopyDag(t *testing.T) {
 			continue
 		}
 
-		// (a) Id 필드
-		origNodeId := origNode.Id
-		newNode.Id = "Modified-" + origNodeId
-		if origNode.Id == newNode.Id {
+		// (a) Id 필드 검증
+		origNodeID := origNode.ID
+		newNode.ID = "Modified-" + origNodeID
+		if origNode.ID == newNode.ID {
 			t.Errorf("Modifying copied node %s.Id affected original", key)
 		}
-		newNode.Id = origNodeId
+		newNode.ID = origNodeID
 
-		// (b) ImageName 필드
+		// (b) ImageName 필드 검증
 		origImage := origNode.ImageName
 		newNode.ImageName = "Modified-" + origImage
 		if origNode.ImageName == newNode.ImageName {
@@ -539,7 +509,7 @@ func TestCopyDag(t *testing.T) {
 		}
 		newNode.ImageName = origImage
 
-		// (c) Commands 필드
+		// (c) Commands 필드 검증
 		origCmd := origNode.Commands
 		newNode.Commands = "Modified-" + origCmd
 		if origNode.Commands == newNode.Commands {
@@ -547,7 +517,7 @@ func TestCopyDag(t *testing.T) {
 		}
 		newNode.Commands = origCmd
 
-		// (d) succeed 필드
+		// (d) succeed 필드 검증
 		origSucceed := origNode.succeed
 		newNode.succeed = !origSucceed
 		if origNode.succeed == newNode.succeed {
@@ -562,13 +532,12 @@ func TestCopyDag(t *testing.T) {
 	}
 	for i, origEdge := range orig.Edges {
 		newEdge := newDag.Edges[i]
-		if newEdge.parentId != origEdge.parentId || newEdge.childId != origEdge.childId {
+		if newEdge.parentID != origEdge.parentID || newEdge.childID != origEdge.childID {
 			t.Errorf("edge %d: expected parent %s->child %s, got parent %s->child %s",
-				i, origEdge.parentId, origEdge.childId, newEdge.parentId, newEdge.childId)
+				i, origEdge.parentID, origEdge.childID, newEdge.parentID, newEdge.childID)
 		}
 	}
-
-}*/
+}
 
 // TODO detectCycleDFS, DetectCycle 테스트 필요.
 
@@ -577,7 +546,7 @@ func TestDetectCycle(t *testing.T) {
 	dag, _ := InitDag()
 
 	// 엣지 추가
-	if err := dag.AddEdge(dag.StartNode.Id, "1"); err != nil {
+	if err := dag.AddEdge(dag.StartNode.ID, "1"); err != nil {
 		t.Fatalf("failed to add edge from StartNode to '1': %v", err)
 	}
 	if err := dag.AddEdge("1", "2"); err != nil {
@@ -619,7 +588,7 @@ func TestSimpleDag(t *testing.T) {
 	// dag.SetContainerCmd(runnable)
 
 	// 엣지 추가
-	if err := dag.AddEdge(dag.StartNode.Id, "1"); err != nil {
+	if err := dag.AddEdge(dag.StartNode.ID, "1"); err != nil {
 		t.Fatalf("failed to add edge from StartNode to '1': %v", err)
 	}
 	if err := dag.AddEdge("1", "2"); err != nil {
@@ -666,16 +635,19 @@ func TestSimple1Dag(t *testing.T) {
 
 	// DAG 설정 초기화: 워커 풀 크기와 채널 버퍼 크기 설정
 	dag.Config = DagConfig{
-		WorkerPoolSize: 5,  // 원하는 워커 수로 설정
-		StatusBuffer:   10, // 원하는 채널 버퍼 사이즈로 설정
+		MinChannelBuffer: 10,
+		MaxChannelBuffer: 50,
+		WorkerPoolSize:   50, // 원하는 워커 수로 설정 이거 적으면 timeout error 발생할 수 있음.
+		StatusBuffer:     10, // 원하는 채널 버퍼 사이즈로 설정
+		DefaultTimeout:   30 * time.Second,
 	}
 
-	// ContainerCmd를 사용하는 경우, 여기에 등록 (현재는 주석 처리)
+	// ContainerCmd 를 사용하는 경우, 여기에 등록 (현재는 주석 처리)
 	// runnable := Connect()
 	// dag.SetContainerCmd(runnable)
 
-	// 엣지 추가: DAG의 노드들 간에 부모/자식 관계 구성
-	if err := dag.AddEdge(dag.StartNode.Id, "1"); err != nil {
+	// 엣지 추가: DAG 의 노드들 간에 부모/자식 관계 구성
+	if err := dag.AddEdge(dag.StartNode.ID, "1"); err != nil {
 		t.Fatalf("failed to add edge from StartNode to '1': %v", err)
 	}
 	if err := dag.AddEdge("1", "2"); err != nil {
@@ -710,7 +682,7 @@ func TestSimple1Dag(t *testing.T) {
 		t.Fatalf("GetReady failed")
 	}
 
-	// 시작 노드의 runner를 실행 (시작 상태 채널에 값 전송)
+	// 시작 노드의 runner 를 실행 (시작 상태 채널에 값 전송)
 	b1 := dag.Start()
 	if b1 != true {
 		t.Errorf("expected Start() to return true, got %v", b1)
@@ -726,13 +698,13 @@ func TestSimple1Dag(t *testing.T) {
 // 간단한 실행 명령을 위한 인터페이스 구현
 type SimpleCommand struct{}
 
-func (c *SimpleCommand) RunE(node interface{}) error {
+func (c *SimpleCommand) RunE(_ interface{}) error {
 	// 간단한 작업 시뮬레이션
 	time.Sleep(100 * time.Millisecond)
 	return nil
 }
 
-// TestComplexDag는 복잡한 DAG 구조를 테스트합니다.
+// TestComplexDag 는 복잡한 DAG 구조를 테스트합니다.
 func TestComplexDag(t *testing.T) {
 	// DAG 초기화
 	dag, err := InitDag()
@@ -751,7 +723,7 @@ func TestComplexDag(t *testing.T) {
 
 	// 엣지 추가
 	edges := []struct{ from, to string }{
-		{dag.StartNode.Id, "A"},
+		{dag.StartNode.ID, "A"},
 		{"A", "B1"},
 		{"A", "B2"},
 		{"B1", "C"},
@@ -776,7 +748,7 @@ func TestComplexDag(t *testing.T) {
 	ctx := context.Background()
 	dag.ConnectRunner()
 
-	if !dag.GetReadyT(ctx) { // GetReadyT 사용
+	if !dag.GetReady(ctx) { // GetReadyT 사용
 		t.Fatalf("GetReadyT failed")
 	}
 
@@ -789,4 +761,220 @@ func TestComplexDag(t *testing.T) {
 	if b2 != true {
 		t.Errorf("expected Wait() to return true, got %v", b2)
 	}
+}
+
+// TestErrorHandlingUsage 는 AddEdge 에서 발생하는 에러들을 통해
+// reportError 로 에러를 기록하고, collectErrors 로 수집하는 흐름을 검증
+func TestErrorHandlingUsage(t *testing.T) {
+	// DAG 초기화 (기본 설정 사용)
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag failed: %v", err)
+	}
+
+	// 강제로 에러 조건을 유발하기 위해 잘못된 엣지 추가
+	// 1. from-node 와 to-node 가 동일한 경우
+	err = dag.AddEdge("1", "1")
+	if err == nil {
+		t.Error("Expected error when adding edge from a node to itself")
+	}
+
+	// 2. from-node 값이 빈 문자열인 경우
+	err = dag.AddEdge("", "2")
+	if err == nil {
+		t.Error("Expected error when adding edge with empty from-node")
+	}
+
+	// 3. to-node 값이 빈 문자열인 경우
+	err = dag.AddEdge("1", "")
+	if err == nil {
+		t.Error("Expected error when adding edge with empty to-node")
+	}
+
+	// 이제 보고된 에러들을 모아본다.
+	// collectErrors 는 내부적으로 최대 5초(여기서는 3초로 설정) 대기 후, 에러들을 리턴한다.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	collectedErrors := dag.collectErrors(ctx)
+
+	// 위에서 3건의 에러가 보고되었으므로, 3건이 수집되어야 함.
+	if len(collectedErrors) != 3 {
+		t.Errorf("Expected 3 errors collected, got %d", len(collectedErrors))
+	}
+
+	// 수집된 에러들을 로그로 출력
+	for i, e := range collectedErrors {
+		t.Logf("Collected error %d: %v", i+1, e)
+	}
+}
+
+// TestComplexDagProgress 는 다이아몬드 패턴 DAG 실행 전후로 Progress() 값을 검증
+func TestComplexDagProgress(t *testing.T) {
+	// DAG 초기화
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag failed: %v", err)
+	}
+
+	// 실행 명령 설정 (SimpleCommand 는 Runnable 인터페이스의 간단한 구현체)
+	dag.SetContainerCmd(&SimpleCommand{})
+
+	// 노드 생성 (다이아몬드 패턴 + 추가 노드)
+	nodeIDs := []string{"A", "B1", "B2", "C", "D1", "D2", "E"}
+	for _, id := range nodeIDs {
+		if node := dag.CreateNode(id); node == nil {
+			t.Fatalf("failed to create node '%s'", id)
+		}
+	}
+
+	// 엣지 추가
+	edges := []struct{ from, to string }{
+		{dag.StartNode.ID, "A"},
+		{"A", "B1"},
+		{"A", "B2"},
+		{"B1", "C"},
+		{"B2", "C"},
+		{"C", "D1"},
+		{"C", "D2"},
+		{"D1", "E"},
+		{"D2", "E"},
+	}
+
+	for _, edge := range edges {
+		if err := dag.AddEdgeIfNodesExist(edge.from, edge.to); err != nil {
+			t.Fatalf("failed to add edge from '%s' to '%s': %v", edge.from, edge.to, err)
+		}
+	}
+
+	// DAG 완성 처리: EndNode 생성 및 모든 노드 연결
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag failed: %v", err)
+	}
+
+	// runner 함수 연결 및 워커 풀 준비
+	dag.ConnectRunner()
+	ctx := context.Background()
+	if !dag.GetReady(ctx) {
+		t.Fatalf("GetReady failed")
+	}
+
+	// 실행 전 Progress() 검증 (아직 아무 노드도 완료되지 않았으므로 0.0이어야 함)
+	if progress := dag.Progress(); progress != 0.0 {
+		t.Errorf("expected initial progress 0.0, got %v", progress)
+	} else {
+		t.Logf("Initial progress: %v", progress)
+	}
+
+	// 시작 노드의 실행
+	if b := dag.Start(); b != true {
+		t.Errorf("expected Start() to return true, got %v", b)
+	}
+
+	// 모든 실행이 완료될 때까지 대기
+	if b := dag.Wait(ctx); b != true {
+		t.Errorf("expected Wait() to return true, got %v", b)
+	}
+
+	// 실행 완료 후 Progress() 검증 (모든 노드가 완료되어야 하므로 1.0이어야 함)
+	if progress := dag.Progress(); progress != 1.0 {
+		t.Errorf("expected progress 1.0 after execution, got %v", progress)
+	} else {
+		t.Logf("Progress after execution: %v", progress)
+	}
+}
+
+// generateDAG 는 numNodes 개의 노드를 생성하고,
+// i < j 인 경우 확률 edgeProb 로 부모-자식 간선을 추가하여 DAG 를 구성
+func generateDAG(numNodes int, edgeProb float64) *Dag {
+	// 새로운 DAG 생성
+	dag := NewDag()
+	dag.nodes = make(map[string]*Node, numNodes)
+
+	// 노드 생성: "0", "1", ..., "numNodes-1"
+	for i := 0; i < numNodes; i++ {
+		id := fmt.Sprintf("%d", i)
+		node := &Node{ID: id}
+		dag.nodes[id] = node
+	}
+
+	// 간선 생성: i < j 조건에서 edgeProb 확률로 간선 추가
+	for i := 0; i < numNodes; i++ {
+		for j := i + 1; j < numNodes; j++ {
+			if rand.Float64() < edgeProb { //nolint:gosec // test only, crypto-rand not required
+				parentID := fmt.Sprintf("%d", i)
+				childID := fmt.Sprintf("%d", j)
+
+				// 엣지 생성 및 등록
+				edge := &Edge{parentID: parentID, childID: childID}
+				dag.Edges = append(dag.Edges, edge)
+
+				// 부모/자식 관계 연결
+				dag.nodes[parentID].children = append(dag.nodes[parentID].children, dag.nodes[childID])
+				dag.nodes[childID].parent = append(dag.nodes[childID].parent, dag.nodes[parentID])
+			}
+		}
+	}
+	return dag
+}
+
+// verifyCopiedDag 는 원본 DAG 와 복사된 노드 맵 및 간선 슬라이스가 동일한 구조를 갖는지 검증
+// 문제가 있으면 에러 메시지를 모아 하나의 error 로 반환하고, 문제가 없으면 nil 을 반환
+func verifyCopiedDag(original *Dag, newNodes map[string]*Node, newEdges []*Edge, methodName string) error {
+	var errs []string
+
+	// (1) 노드 수 검증
+	if len(newNodes) != len(original.nodes) {
+		errs = append(errs, fmt.Sprintf("[%s] expected %d nodes, got %d", methodName, len(original.nodes), len(newNodes)))
+	}
+
+	// (2) 각 노드의 ID, 부모/자식 관계 검증
+	for id, origNode := range original.nodes {
+		newNode, ok := newNodes[id]
+		if !ok {
+			errs = append(errs, fmt.Sprintf("[%s] node with ID %s missing in newNodes", methodName, id))
+			continue
+		}
+		// ID 비교
+		if newNode.ID != origNode.ID {
+			errs = append(errs, fmt.Sprintf("[%s] expected node ID %s, got %s", methodName, origNode.ID, newNode.ID))
+		}
+		// 부모 관계 검증
+		if len(newNode.parent) != len(origNode.parent) {
+			errs = append(errs, fmt.Sprintf("[%s] node %s: expected %d parents, got %d", methodName, id, len(origNode.parent), len(newNode.parent)))
+		} else {
+			for i, p := range newNode.parent {
+				if p.ID != origNode.parent[i].ID {
+					errs = append(errs, fmt.Sprintf("[%s] node %s: expected parent %s, got %s", methodName, id, origNode.parent[i].ID, p.ID))
+				}
+			}
+		}
+		// 자식 관계 검증
+		if len(newNode.children) != len(origNode.children) {
+			errs = append(errs, fmt.Sprintf("[%s] node %s: expected %d children, got %d", methodName, id, len(origNode.children), len(newNode.children)))
+		} else {
+			for i, c := range newNode.children {
+				if c.ID != origNode.children[i].ID {
+					errs = append(errs, fmt.Sprintf("[%s] node %s: expected child %s, got %s", methodName, id, origNode.children[i].ID, c.ID))
+				}
+			}
+		}
+	}
+
+	// (3) 간선 검증
+	if len(newEdges) != len(original.Edges) {
+		errs = append(errs, fmt.Sprintf("[%s] expected %d edges, got %d", methodName, len(original.Edges), len(newEdges)))
+	}
+	for i, origEdge := range original.Edges {
+		newEdge := newEdges[i]
+		if newEdge.parentID != origEdge.parentID || newEdge.childID != origEdge.childID {
+			errs = append(errs, fmt.Sprintf("[%s] edge %d: expected parent %s->child %s, got parent %s->child %s",
+				methodName, i, origEdge.parentID, origEdge.childID, newEdge.parentID, newEdge.childID))
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf(strings.Join(errs, "\n"))
+	}
+	return nil
 }

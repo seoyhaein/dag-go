@@ -1545,5 +1545,270 @@ func (dag *Dag) closeChannels() {
 	}*/
 }
 
+// GetReady prepares the DAG for execution with separate handling for start and end nodes.
+func (dag *Dag) GetReady(ctx context.Context) bool {
+	dag.mu.Lock()
+	defer dag.mu.Unlock()
+
+	n := len(dag.nodes)
+	if n < 1 {
+		return false
+	}
+
+	// 워커 풀 초기화
+	maxWorkers := min(n, dag.Config.WorkerPoolSize)
+	dag.workerPool = NewDagWorkerPool(maxWorkers)
+
+	var safeChs []*SafeChannel[*printStatus]
+	// 종료 노드용 SafeChannel 생성
+	endCh := NewSafeChannelGen[*printStatus](dag.Config.MinChannelBuffer)
+	var end *Node
+
+	// 각 노드를 순회하며 SafeChannel 생성 및 작업 제출
+	for _, v := range dag.nodes {
+		// 변수 캡처를 위해 별도 변수에 할당
+		nd := v
+
+		if nd.Id == StartNode {
+			safeCh := NewSafeChannelGen[*printStatus](dag.Config.MinChannelBuffer)
+			// 시작 노드는 맨 앞에 삽입
+			safeChs = insertSafe(safeChs, 0, safeCh)
+
+			// 워커 풀에 시작 노드의 작업 제출
+			dag.workerPool.Submit(func() {
+				select {
+				case <-ctx.Done():
+					safeCh.Close()
+					return
+				default:
+					nd.runner(ctx, safeCh)
+				}
+			})
+		}
+
+		if nd.Id != StartNode && nd.Id != EndNode {
+			safeCh := NewSafeChannelGen[*printStatus](dag.Config.MinChannelBuffer)
+			safeChs = append(safeChs, safeCh)
+
+			// 일반 노드 작업 제출
+			dag.workerPool.Submit(func() {
+				select {
+				case <-ctx.Done():
+					safeCh.Close()
+					return
+				default:
+					nd.runner(ctx, safeCh)
+				}
+			})
+		}
+
+		if nd.Id == EndNode {
+			end = nd
+		}
+	}
+
+	if end == nil {
+		Log.Println("Warning: EndNode is nil")
+		return false
+	}
+
+	// 종료 노드 SafeChannel 를 safeChs 슬라이스에 추가
+	safeChs = append(safeChs, endCh)
+
+	// 종료 노드 작업 제출
+	dag.workerPool.Submit(func() {
+		select {
+		case <-ctx.Done():
+			endCh.Close()
+			return
+		default:
+			end.runner(ctx, endCh)
+		}
+	})
+
+	if dag.nodeResult != nil {
+		return false
+	}
+	// 최종적으로 safeChs 슬라이스를 dag.runningStatus1에 저장
+	dag.nodeResult = safeChs
+	return true
+}
+
+func fanIn(ctx context.Context, channels []chan *printStatus) chan *printStatus {
+	merged := make(chan *printStatus)
+	var wg sync.WaitGroup
+
+	// 각 입력 채널에 대한 고루틴 시작
+	for _, ch := range channels {
+		wg.Add(1)
+		go func(c chan *printStatus) {
+			defer wg.Done()
+			for val := range c {
+				select {
+				case merged <- val:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}(ch)
+	}
+
+	// 모든 입력 채널이 닫히면 출력 채널도 닫음
+	go func() {
+		wg.Wait()
+		close(merged)
+	}()
+
+	return merged
+}
+
+func insert(a []chan *printStatus, index int, value chan *printStatus) []chan *printStatus {
+	if len(a) == index { // nil or empty slice or after last element
+		return append(a, value)
+	}
+	a = append(a[:index+1], a[index:]...) // index < len(a)
+	a[index] = value
+	return a
+}
+
+func connectRunner(n *Node) {
+	n.runner = func(ctx context.Context, result chan *printStatus) {
+		defer close(result)
+
+		// 헬퍼 함수: printStatus 값을 복사해 반환
+		copyStatus := func(ps *printStatus) *printStatus {
+			return &printStatus{
+				rStatus: ps.rStatus,
+				nodeId:  ps.nodeId,
+			}
+		}
+
+		// 부모 노드 상태 확인
+		if !n.CheckParentsStatus() {
+			ps := newPrintStatus(PostFlightFailed, n.Id)
+			// 복사본을 만들어 채널에 전달
+			result <- copyStatus(ps)
+			releasePrintStatus(ps)
+			return
+		}
+
+		n.SetStatus(NodeStatusRunning)
+
+		// preFlight 단계 실행
+		ps := preFlight(ctx, n)
+		result <- copyStatus(ps)
+		if ps.rStatus == PreflightFailed {
+			n.SetStatus(NodeStatusFailed)
+			releasePrintStatus(ps)
+			return
+		}
+		releasePrintStatus(ps)
+
+		// inFlight 단계 실행
+		ps = inFlight(n)
+		result <- copyStatus(ps)
+		if ps.rStatus == InFlightFailed {
+			n.SetStatus(NodeStatusFailed)
+			releasePrintStatus(ps)
+			return
+		}
+		releasePrintStatus(ps)
+
+		// postFlight 단계 실행
+		ps = postFlight(n)
+		result <- copyStatus(ps)
+		if ps.rStatus == PostFlightFailed {
+			n.SetStatus(NodeStatusFailed)
+		} else {
+			n.SetStatus(NodeStatusSucceeded)
+		}
+		releasePrintStatus(ps)
+	}
+}
+
+func (dag *Dag) Wait(ctx context.Context) bool {
+	// 채널 닫기는 DAG 종료 시 처리
+	defer dag.closeChannels()
+
+	// 워커 풀 종료
+	if dag.workerPool != nil {
+		defer dag.workerPool.Close()
+	}
+
+	// 컨텍스트에서 타임아웃 설정
+	var waitCtx context.Context
+	var cancel context.CancelFunc
+
+	if dag.bTimeout {
+		waitCtx, cancel = context.WithTimeout(ctx, dag.Timeout)
+	} else {
+		waitCtx, cancel = context.WithCancel(ctx)
+	}
+	defer cancel()
+
+	// 채널 병합
+	go dag.merge(waitCtx)
+
+	for {
+		select {
+		case c := <-dag.RunningStatus1:
+			if c.nodeId == EndNode {
+				if c.rStatus == PreflightFailed {
+					return false
+				}
+				if c.rStatus == InFlightFailed {
+					return false
+				}
+				if c.rStatus == PostFlightFailed {
+					return false
+				}
+				if c.rStatus == FlightEnd {
+					return true
+				}
+			}
+		case <-waitCtx.Done():
+			Log.Printf("DAG execution timed out or cancelled: %v", waitCtx.Err())
+			return false
+		}
+	}
+}
+
+func (dag *Dag) Start() bool {
+    if len(dag.StartNode.parentVertex) != 1 {
+        return false
+    }
+    dag.StartNode.SetSucceed(true)
+
+    // Send 결과를 받을 채널을 만든다.
+    resultCh := make(chan bool, 1)
+
+    go func(sc *SafeChannel[runningStatus], resultCh chan bool) {
+        success := sc.Send(Start)
+        resultCh <- success // Send 의 결과를 resultCh에 전달한다.
+        // 채널 닫기는 DAG 레벨에서 관리함.
+    }(dag.StartNode.parentVertex[0], resultCh)
+
+    // 고루틴에서 받은 결과를 기다린다.
+    success := <-resultCh
+    if !success {
+        Log.Printf("Failed to send Start status on safe channel for start node")
+        dag.StartNode.SetSucceed(false)
+    }
+    return success
+}
+
+func (dag *Dag) StartDag() (*Dag, error) {
+	dag.mu.Lock()
+	defer dag.mu.Unlock()
+
+	if dag.StartNode = dag.createNode(StartNode); dag.StartNode == nil {
+		return nil, fmt.Errorf("failed to create start node")
+	}
+	// 새 제네릭 SafeChannel 을 생성하고, 그 내부 채널을 시작 노드의 parentVertex 에 추가함.
+	safeChan := NewSafeChannelGen[runningStatus](dag.Config.MinChannelBuffer)
+	dag.StartNode.parentVertex = append(dag.StartNode.parentVertex, safeChan)
+	return dag, nil
+}
+
 
 ```

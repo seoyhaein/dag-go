@@ -10,9 +10,7 @@ import (
 	"time"
 )
 
-// TODO 아래 코드 사용하는 부분 면밀히 검토해야함. 중요. 우선 처리할것.
-// NewSafeChannelGen
-// channel 들에 대한 close 를 다 확인한다.
+// TODO context 확인해야 함.
 
 // ==================== 상수 정의 ====================
 
@@ -80,8 +78,7 @@ type createEdgeErrorType int
 // Dag (Directed Acyclic Graph) is an acyclic graph, not a cyclic graph.
 // In other words, there is no cyclic cycle in the DAG algorithm, and it has only one direction.
 type Dag struct {
-	Pid   string // TODO 이거 삭제해도 될것 같은데..
-	Id    string
+	ID    string
 	Edges []*Edge
 
 	nodes     map[string]*Node
@@ -112,8 +109,8 @@ type Dag struct {
 
 // Edge is a channel. It has the same meaning as the connecting line connecting the parent and child nodes.
 type Edge struct {
-	parentId   string
-	childId    string
+	parentID   string
+	childID    string
 	safeVertex *SafeChannel[runningStatus] // 안전한 채널 추가.
 }
 
@@ -139,7 +136,7 @@ func NewDag() *Dag {
 func NewDagWithConfig(config DagConfig) *Dag {
 	return &Dag{
 		nodes:       make(map[string]*Node),
-		Id:          uuid.NewString(),
+		ID:          uuid.NewString(),
 		NodesResult: NewSafeChannelGen[*printStatus](config.MaxChannelBuffer),
 		Config:      config,
 		Errors:      make(chan error, config.MaxChannelBuffer), // 에러 채널 초기화
@@ -241,10 +238,19 @@ func (dag *Dag) StartDag() (*Dag, error) {
 	dag.mu.Lock()
 	defer dag.mu.Unlock()
 
-	if dag.StartNode = dag.createNode(StartNode); dag.StartNode == nil {
-		return nil, fmt.Errorf("failed to create start node")
+	// logErr 헬퍼 함수 정의: 에러 로그에 추가하고 reportError 호출
+	logErr := func(err error) error {
+		dag.errLogs = append(dag.errLogs, &systemError{StartDag, err}) // 필요에 따라 타입을 수정
+		dag.reportError(err)
+		return err
 	}
-	// 새 제네릭 SafeChannel 을 생성하고, 그 내부 채널을 시작 노드의 parentVertex 에 추가함.
+
+	// StartNode 생성 및 에러 처리
+	if dag.StartNode = dag.createNode(StartNode); dag.StartNode == nil {
+		return nil, logErr(fmt.Errorf("failed to create start node"))
+	}
+
+	// 새 제네릭 SafeChannel 생성 후, 시작 노드의 parentVertex에 추가
 	safeChan := NewSafeChannelGen[runningStatus](dag.Config.MinChannelBuffer)
 	dag.StartNode.parentVertex = append(dag.StartNode.parentVertex, safeChan)
 	return dag, nil
@@ -299,19 +305,19 @@ func (dag *Dag) collectErrors(ctx context.Context) []error {
 }
 
 // createEdge creates an Edge with safety mechanisms.
-func (dag *Dag) createEdge(parentId, childId string) (*Edge, createEdgeErrorType) {
-	if utils.IsEmptyString(parentId) || utils.IsEmptyString(childId) {
+func (dag *Dag) createEdge(parentID, childID string) (*Edge, createEdgeErrorType) {
+	if utils.IsEmptyString(parentID) || utils.IsEmptyString(childID) {
 		return nil, Fault
 	}
 
 	// 이미 존재하는 엣지 확인
-	if edgeExists(dag.Edges, parentId, childId) {
+	if edgeExists(dag.Edges, parentID, childID) {
 		return nil, Exist
 	}
 
 	edge := &Edge{
-		parentId:   parentId,
-		childId:    childId,
+		parentID:   parentID,
+		childID:    childID,
 		safeVertex: NewSafeChannelGen[runningStatus](dag.Config.MinChannelBuffer), // 제네릭 SafeChannel 을 사용하여 안전한 채널 생성
 	}
 
@@ -323,20 +329,38 @@ func (dag *Dag) createEdge(parentId, childId string) (*Edge, createEdgeErrorType
 func (dag *Dag) closeChannels() {
 	for _, edge := range dag.Edges {
 		if edge.safeVertex != nil {
-			cErr := edge.safeVertex.Close()
-			if cErr != nil {
-				Log.Printf("Error closing channel for edge %s -> %s: %v", edge.parentId, edge.childId, cErr)
+			if err := edge.safeVertex.Close(); err != nil {
+				Log.Warnf("Failed to close edge channel [%s -> %s]: %v", edge.parentID, edge.childID, err)
 			} else {
-				Log.Printf("Closed channel for edge %s -> %s", edge.parentId, edge.childId)
+				Log.Infof("Closed edge channel [%s -> %s]", edge.parentID, edge.childID)
 			}
+		}
+	}
+
+	if dag.NodesResult != nil {
+		if err := dag.NodesResult.Close(); err != nil {
+			Log.Warnf("Failed to close NodesResult channel: %v", err)
+		} else {
+			Log.Info("Closed NodesResult channel")
+		}
+	}
+
+	for i, sc := range dag.nodeResult {
+		if sc == nil {
+			continue
+		}
+		if err := sc.Close(); err != nil {
+			Log.Warnf("Failed to close nodeResult[%d] channel: %v", i, err)
+		} else {
+			Log.Infof("Closed nodeResult[%d] channel", i)
 		}
 	}
 }
 
 // getSafeVertex returns the channel for the specified parent and child nodes.
-func (dag *Dag) getSafeVertex(parentId, childId string) *SafeChannel[runningStatus] {
+func (dag *Dag) getSafeVertex(parentID, childID string) *SafeChannel[runningStatus] {
 	for _, v := range dag.Edges {
-		if v.parentId == parentId && v.childId == childId {
+		if v.parentID == parentID && v.childID == childID {
 			return v.safeVertex
 		}
 	}
@@ -381,7 +405,7 @@ func (dag *Dag) createNode(id string) *Node {
 	if dag.ContainerCmd != nil {
 		node = createNode(id, dag.ContainerCmd)
 	} else {
-		node = createNodeWithId(id)
+		node = createNodeWithID(id)
 	}
 
 	node.parentDag = dag
@@ -405,7 +429,7 @@ func (dag *Dag) createNodeWithTimeOut(id string, ti time.Duration) *Node {
 	if dag.ContainerCmd != nil {
 		node = createNode(id, dag.ContainerCmd)
 	} else {
-		node = createNodeWithId(id)
+		node = createNodeWithID(id)
 	}
 
 	node.bTimeout = true
@@ -470,7 +494,7 @@ func (dag *Dag) AddEdge(from, to string) error {
 	toNode.parent = append(toNode.parent, fromNode)
 
 	// 엣지 생성 및 검증
-	edge, check := dag.createEdge(fromNode.Id, toNode.Id)
+	edge, check := dag.createEdge(fromNode.ID, toNode.ID)
 	if check == Fault || check == Exist {
 		return logErr(fmt.Errorf("edge cannot be created"))
 	}
@@ -487,7 +511,7 @@ func (dag *Dag) AddEdge(from, to string) error {
 func (dag *Dag) AddEdgeIfNodesExist(from, to string) error {
 	// 에러 로그를 기록하고 반환하는 클로저 함수
 	logErr := func(err error) error {
-		dag.errLogs = append(dag.errLogs, &systemError{AddEdge, err})
+		dag.errLogs = append(dag.errLogs, &systemError{AddEdgeIfNodesExist, err})
 		dag.reportError(err) // 에러 채널에 보고
 		return err
 	}
@@ -528,7 +552,7 @@ func (dag *Dag) AddEdgeIfNodesExist(from, to string) error {
 	toNode.parent = append(toNode.parent, fromNode)
 
 	// 엣지 생성 및 검증
-	edge, check := dag.createEdge(fromNode.Id, toNode.Id)
+	edge, check := dag.createEdge(fromNode.ID, toNode.ID)
 	if check == Fault || check == Exist {
 		return logErr(fmt.Errorf("edge cannot be created"))
 	}
@@ -543,12 +567,19 @@ func (dag *Dag) AddEdgeIfNodesExist(from, to string) error {
 
 // addEndNode adds an edge to the end node.
 func (dag *Dag) addEndNode(fromNode, toNode *Node) error {
+	// logErr 헬퍼 함수: 에러 발생 시 errLogs에 기록하고, reportError 호출
+	logErr := func(err error) error {
+		dag.errLogs = append(dag.errLogs, &systemError{addEndNode, err})
+		dag.reportError(err)
+		return err
+	}
+
 	// 입력 노드 검증
 	if fromNode == nil {
-		return fmt.Errorf("fromNode is nil")
+		return logErr(fmt.Errorf("fromNode is nil"))
 	}
 	if toNode == nil {
-		return fmt.Errorf("toNode is nil")
+		return logErr(fmt.Errorf("toNode is nil"))
 	}
 
 	// 부모-자식 관계 설정
@@ -556,15 +587,15 @@ func (dag *Dag) addEndNode(fromNode, toNode *Node) error {
 	toNode.parent = append(toNode.parent, fromNode)
 
 	// 엣지 생성 및 체크
-	edge, check := dag.createEdge(fromNode.Id, toNode.Id)
+	edge, check := dag.createEdge(fromNode.ID, toNode.ID)
 	if check == Fault || check == Exist {
-		return fmt.Errorf("edge cannot be created")
+		return logErr(fmt.Errorf("edge cannot be created"))
 	}
 	if edge == nil {
-		return fmt.Errorf("vertex is nil")
+		return logErr(fmt.Errorf("vertex is nil"))
 	}
 
-	// 엣지의 vertex 양쪽 노드에 추가
+	// 엣지의 vertex를 양쪽 노드에 추가
 	fromNode.childrenVertex = append(fromNode.childrenVertex, edge.safeVertex)
 	toNode.parentVertex = append(toNode.parentVertex, edge.safeVertex)
 
@@ -578,7 +609,7 @@ func (dag *Dag) FinishDag() error {
 
 	// 에러 로그를 기록하고 반환하는 클로저 함수 (finishDag 에러 타입 사용)
 	logErr := func(err error) error {
-		dag.errLogs = append(dag.errLogs, &systemError{finishDag, err})
+		dag.errLogs = append(dag.errLogs, &systemError{FinishDag, err})
 		dag.reportError(err) // 에러 채널에 보고
 		return err
 	}
@@ -612,18 +643,18 @@ func (dag *Dag) FinishDag() error {
 		if len(n.children) == 0 && len(n.parent) == 0 {
 			if len(nodes) == 1 {
 				// 노드가 단 하나일 경우, 반드시 시작 노드여야 함.
-				if n.Id != StartNode {
+				if n.ID != StartNode {
 					return logErr(fmt.Errorf("invalid node: only node is not the start node"))
 				}
 			} else {
-				return logErr(fmt.Errorf("node '%s' has no parent and no children", n.Id))
+				return logErr(fmt.Errorf("node '%s' has no parent and no children", n.ID))
 			}
 		}
 
 		// 종료 노드가 아니면서 자식이 없는 경우, 종료 노드와 연결
-		if n.Id != EndNode && len(n.children) == 0 {
+		if n.ID != EndNode && len(n.children) == 0 {
 			if err := dag.addEndNode(n, dag.EndNode); err != nil {
-				return logErr(fmt.Errorf("addEndNode failed for node '%s': %w", n.Id, err))
+				return logErr(fmt.Errorf("addEndNode failed for node '%s': %w", n.ID, err))
 			}
 		}
 	}
@@ -671,10 +702,8 @@ func (dag *Dag) ConnectRunner() bool {
 	return true
 }
 
-// TODO GetReadyT 와 GetReady 하나만 남겨놓기.
-
-// GetReadyT prepares the DAG for execution with worker pool.
-func (dag *Dag) GetReadyT(ctx context.Context) bool {
+// GetReady prepares the DAG for execution with worker pool.
+func (dag *Dag) GetReady(ctx context.Context) bool {
 	dag.mu.Lock()
 	defer dag.mu.Unlock()
 
@@ -684,7 +713,7 @@ func (dag *Dag) GetReadyT(ctx context.Context) bool {
 	}
 
 	// 워커 풀 초기화
-	maxWorkers := min(n, dag.Config.WorkerPoolSize)
+	maxWorkers := minInt(n, dag.Config.WorkerPoolSize)
 	dag.workerPool = NewDagWorkerPool(maxWorkers)
 
 	// 각 노드별로 SafeChannel[*printStatus]를 생성하여 safeChs 슬라이스에 저장한다.
@@ -700,8 +729,7 @@ func (dag *Dag) GetReadyT(ctx context.Context) bool {
 		dag.workerPool.Submit(func() {
 			select {
 			case <-ctx.Done():
-				// TODO 확인하기. 이거 지워야 할거 같은데.
-				sc.Close()
+				// sc.Close()
 				return
 			default:
 				nd.runner(ctx, sc)
@@ -709,101 +737,9 @@ func (dag *Dag) GetReadyT(ctx context.Context) bool {
 		})
 	}
 
-	// TODO 수정해줘야 함. 일단 채널 슬라이스인데 단순히 nil 체크로 올바른지 확인 필요.
 	if dag.nodeResult != nil {
 		return false
 	}
-	dag.nodeResult = safeChs
-	return true
-}
-
-// GetReady prepares the DAG for execution with separate handling for start and end nodes.
-func (dag *Dag) GetReady(ctx context.Context) bool {
-	dag.mu.Lock()
-	defer dag.mu.Unlock()
-
-	n := len(dag.nodes)
-	if n < 1 {
-		return false
-	}
-
-	// 워커 풀 초기화
-	maxWorkers := min(n, dag.Config.WorkerPoolSize)
-	dag.workerPool = NewDagWorkerPool(maxWorkers)
-
-	var safeChs []*SafeChannel[*printStatus]
-	// 종료 노드용 SafeChannel 생성
-	endCh := NewSafeChannelGen[*printStatus](dag.Config.MinChannelBuffer)
-	var end *Node
-
-	// 각 노드를 순회하며 SafeChannel 생성 및 작업 제출
-	for _, v := range dag.nodes {
-		// 변수 캡처를 위해 별도 변수에 할당
-		node := v
-
-		if node.Id == StartNode {
-			safeCh := NewSafeChannelGen[*printStatus](dag.Config.MinChannelBuffer)
-			// 시작 노드는 맨 앞에 삽입
-			safeChs = insertSafe(safeChs, 0, safeCh)
-
-			// 워커 풀에 시작 노드의 작업 제출
-			dag.workerPool.Submit(func() {
-				select {
-				case <-ctx.Done():
-					safeCh.Close()
-					return
-				default:
-					node.runner(ctx, safeCh)
-				}
-			})
-		}
-
-		if node.Id != StartNode && node.Id != EndNode {
-			safeCh := NewSafeChannelGen[*printStatus](dag.Config.MinChannelBuffer)
-			safeChs = append(safeChs, safeCh)
-
-			// 일반 노드 작업 제출
-			dag.workerPool.Submit(func() {
-				select {
-				case <-ctx.Done():
-					safeCh.Close()
-					return
-				default:
-					node.runner(ctx, safeCh)
-				}
-			})
-		}
-
-		if node.Id == EndNode {
-			end = node
-		}
-	}
-
-	if end == nil {
-		Log.Println("Warning: EndNode is nil")
-		return false
-	}
-
-	// 종료 노드 SafeChannel 를 safeChs 슬라이스에 추가
-	safeChs = append(safeChs, endCh)
-
-	// 종료 노드 작업 제출
-	dag.workerPool.Submit(func() {
-		select {
-		case <-ctx.Done():
-			endCh.Close()
-			return
-		default:
-			end.runner(ctx, endCh)
-		}
-	})
-
-	// TODO 확인해볼것
-	// 이미 runningStatus1가 설정되어 있다면 준비 실패로 처리
-	if dag.nodeResult != nil {
-		return false
-	}
-	// 최종적으로 safeChs 슬라이스를 dag.runningStatus1에 저장
 	dag.nodeResult = safeChs
 	return true
 }
@@ -825,38 +761,10 @@ func (dag *Dag) Start() bool {
 	return true
 }
 
-/*
-func (dag *Dag) Start() bool {
-    if len(dag.StartNode.parentVertex) != 1 {
-        return false
-    }
-    dag.StartNode.SetSucceed(true)
-
-    // Send 결과를 받을 채널을 만든다.
-    resultCh := make(chan bool, 1)
-
-    go func(sc *SafeChannel[runningStatus], resultCh chan bool) {
-        success := sc.Send(Start)
-        resultCh <- success // Send 의 결과를 resultCh에 전달한다.
-        // 채널 닫기는 DAG 레벨에서 관리함.
-    }(dag.StartNode.parentVertex[0], resultCh)
-
-    // 고루틴에서 받은 결과를 기다린다.
-    success := <-resultCh
-    if !success {
-        Log.Printf("Failed to send Start status on safe channel for start node")
-        dag.StartNode.SetSucceed(false)
-    }
-    return success
-}
-*/
-
-// Wait waits for the DAG execution to complete. // TODO 실패 부분 보다 정확히 해야함. 버그 있음.
+// Wait waits for the DAG execution to complete.
 func (dag *Dag) Wait(ctx context.Context) bool {
 	// DAG 종료 시 채널들을 안전하게 닫는다.
 	defer dag.closeChannels()
-
-	// TODO 여기서 NodesResult 와 nodeResult 를 닫는 것이 낳을 듯한데 생각해보자.
 
 	// 워커 풀 종료
 	if dag.workerPool != nil {
@@ -880,7 +788,6 @@ func (dag *Dag) Wait(ctx context.Context) bool {
 		mergeResult <- dag.merge(waitCtx)
 	}()
 
-	// merged 값은 dag.RunningStatus1 내부 SafeChannel 의 채널을 통해 수신한다.
 	for {
 		select {
 		case ok := <-mergeResult:
@@ -913,65 +820,16 @@ func (dag *Dag) Wait(ctx context.Context) bool {
 	}
 }
 
-/*
-func (dag *Dag) Wait(ctx context.Context) bool {
-	// 채널 닫기는 DAG 종료 시 처리
-	defer dag.closeChannels()
-
-	// 워커 풀 종료
-	if dag.workerPool != nil {
-		defer dag.workerPool.Close()
-	}
-
-	// 컨텍스트에서 타임아웃 설정
-	var waitCtx context.Context
-	var cancel context.CancelFunc
-
-	if dag.bTimeout {
-		waitCtx, cancel = context.WithTimeout(ctx, dag.Timeout)
-	} else {
-		waitCtx, cancel = context.WithCancel(ctx)
-	}
-	defer cancel()
-
-	// 채널 병합
-	go dag.merge(waitCtx)
-
-	for {
-		select {
-		case c := <-dag.RunningStatus1:
-			if c.nodeId == EndNode {
-				if c.rStatus == PreflightFailed {
-					return false
-				}
-				if c.rStatus == InFlightFailed {
-					return false
-				}
-				if c.rStatus == PostFlightFailed {
-					return false
-				}
-				if c.rStatus == FlightEnd {
-					return true
-				}
-			}
-		case <-waitCtx.Done():
-			Log.Printf("DAG execution timed out or cancelled: %v", waitCtx.Err())
-			return false
-		}
-	}
-}
-*/
-
 // detectCycleDFS detects cycles using DFS.
 func detectCycleDFS(node *Node, visited, recStack map[string]bool) bool {
-	if recStack[node.Id] {
+	if recStack[node.ID] {
 		return true
 	}
-	if visited[node.Id] {
+	if visited[node.ID] {
 		return false
 	}
-	visited[node.Id] = true
-	recStack[node.Id] = true
+	visited[node.ID] = true
+	recStack[node.ID] = true
 
 	for _, child := range node.children {
 		if detectCycleDFS(child, visited, recStack) {
@@ -979,7 +837,7 @@ func detectCycleDFS(node *Node, visited, recStack map[string]bool) bool {
 		}
 	}
 
-	recStack[node.Id] = false
+	recStack[node.ID] = false
 	return false
 }
 
@@ -992,7 +850,7 @@ func DetectCycle(dag *Dag) bool {
 
 	// 새로 복사된 노드들을 대상으로 DFS 를 수행
 	for _, node := range newNodes {
-		if !visited[node.Id] {
+		if !visited[node.ID] {
 			if detectCycleDFS(node, visited, recStack) {
 				return true
 			}
@@ -1002,65 +860,8 @@ func DetectCycle(dag *Dag) bool {
 }
 
 // connectRunner connects a runner function to a node.
-/*func connectRunner(n *Node) {
-	n.runner = func(ctx context.Context, result chan *printStatus) {
-		defer close(result)
-
-		// 헬퍼 함수: printStatus 값을 복사해 반환
-		copyStatus := func(ps *printStatus) *printStatus {
-			return &printStatus{
-				rStatus: ps.rStatus,
-				nodeId:  ps.nodeId,
-			}
-		}
-
-		// 부모 노드 상태 확인
-		if !n.CheckParentsStatus() {
-			ps := newPrintStatus(PostFlightFailed, n.Id)
-			// 복사본을 만들어 채널에 전달
-			result <- copyStatus(ps)
-			releasePrintStatus(ps)
-			return
-		}
-
-		n.SetStatus(NodeStatusRunning)
-
-		// preFlight 단계 실행
-		ps := preFlight(ctx, n)
-		result <- copyStatus(ps)
-		if ps.rStatus == PreflightFailed {
-			n.SetStatus(NodeStatusFailed)
-			releasePrintStatus(ps)
-			return
-		}
-		releasePrintStatus(ps)
-
-		// inFlight 단계 실행
-		ps = inFlight(n)
-		result <- copyStatus(ps)
-		if ps.rStatus == InFlightFailed {
-			n.SetStatus(NodeStatusFailed)
-			releasePrintStatus(ps)
-			return
-		}
-		releasePrintStatus(ps)
-
-		// postFlight 단계 실행
-		ps = postFlight(n)
-		result <- copyStatus(ps)
-		if ps.rStatus == PostFlightFailed {
-			n.SetStatus(NodeStatusFailed)
-		} else {
-			n.SetStatus(NodeStatusSucceeded)
-		}
-		releasePrintStatus(ps)
-	}
-}*/
-
 func connectRunner(n *Node) {
 	n.runner = func(ctx context.Context, result *SafeChannel[*printStatus]) {
-		defer result.Close() // runner 종료 시 SafeChannel 의 내부 채널을 닫음 TODO 확인해야함.
-
 		// 헬퍼 함수: printStatus 값을 복사해 반환, 지우지 말것.
 		// 여기서 중요한 사항.
 		// 아래 코드를 보면 printStatus 새로운 복사본을 하나 만들어서 값을 넣어주는데, 포인터를 입력파라미터로 받았다.
@@ -1075,7 +876,7 @@ func connectRunner(n *Node) {
 
 		// 부모 노드 상태 확인
 		if !n.CheckParentsStatus() {
-			ps := newPrintStatus(PostFlightFailed, n.Id)
+			ps := newPrintStatus(PostFlightFailed, n.ID)
 			// 복사본을 만들어 SafeChannel 에 전송
 			result.Send(copyStatus(ps))
 			releasePrintStatus(ps)
@@ -1116,16 +917,7 @@ func connectRunner(n *Node) {
 	}
 }
 
-// insert inserts a value into a slice at the specified index.
-/*func insert(a []chan *printStatus, index int, value chan *printStatus) []chan *printStatus {
-	if len(a) == index { // nil or empty slice or after last element
-		return append(a, value)
-	}
-	a = append(a[:index+1], a[index:]...) // index < len(a)
-	a[index] = value
-	return a
-}*/
-// insertSafe inserts a value into a slice at the specified index.
+// insertSafe inserts a value into a slice at the specified index. 지금은 사용하지 않지만 지우지 말것.
 func insertSafe(a []*SafeChannel[*printStatus], index int, value *SafeChannel[*printStatus]) []*SafeChannel[*printStatus] {
 	if len(a) == index { // 빈 슬라이스이거나 마지막 요소 뒤에 삽입하는 경우
 		return append(a, value)
@@ -1137,20 +929,15 @@ func insertSafe(a []*SafeChannel[*printStatus], index int, value *SafeChannel[*p
 
 // merge merges all status channels using fan-in pattern.
 func (dag *Dag) merge(ctx context.Context) bool {
-	// 종료 시 SafeChannel의 Close 메서드를 호출함. TODO 이거 왜 해주는지 이해 안됨.
-	// defer dag.RunningStatus1.Close()
-
 	// 입력 SafeChannel 슬라이스가 비어 있으면 그대로 종료함.
 	if len(dag.nodeResult) < 1 {
 		return false
 	}
 
-	// safeChs (dag.runningStatus1)들을 팬인 패턴으로 병합하여 merged SafeChannel을 얻음.
 	return fanIn(ctx, dag.nodeResult, dag.NodesResult)
-
 }
 
-// fanIn merges multiple channels into one. TODO 여기서 채널을 그냥 퉁쳤는데 입력 채널, 출력 채널 구분해서 하는게 어떨지 고민하자.
+// fanIn merges multiple channels into one.
 func fanIn(ctx context.Context, channels []*SafeChannel[*printStatus], merged *SafeChannel[*printStatus]) bool {
 	var wg sync.WaitGroup
 	var cancelled int32 // 0: 정상, 1: ctx.Done 발생
@@ -1173,48 +960,54 @@ func fanIn(ctx context.Context, channels []*SafeChannel[*printStatus], merged *S
 		}(sc)
 	}
 
-	// 모든 고루틴이 종료되면 merged SafeChannel 을 닫는다.
 	wg.Wait()
-	merged.Close()
 
 	// cancellation 플래그가 설정되어 있으면 false, 아니면 true 리턴
 	return atomic.LoadInt32(&cancelled) == 0
 }
 
-/*func fanIn(ctx context.Context, channels []chan *printStatus) chan *printStatus {
-	merged := make(chan *printStatus)
-	var wg sync.WaitGroup
-
-	// 각 입력 채널에 대한 고루틴 시작
-	for _, ch := range channels {
-		wg.Add(1)
-		go func(c chan *printStatus) {
-			defer wg.Done()
-			for val := range c {
-				select {
-				case merged <- val:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}(ch)
-	}
-
-	// 모든 입력 채널이 닫히면 출력 채널도 닫음
-	go func() {
-		wg.Wait()
-		close(merged)
-	}()
-
-	return merged
-}*/
-
 // min returns the minimum of two integers.
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}
 	return b
+}
+
+func CopyDag(original *Dag, newID string) *Dag {
+	if original == nil {
+		return nil
+	}
+	if utils.IsEmptyString(newID) {
+		return nil
+	}
+
+	copied := &Dag{
+		ID:           newID,
+		Timeout:      original.Timeout,
+		bTimeout:     original.bTimeout,
+		ContainerCmd: original.ContainerCmd,
+		validated:    original.validated,
+		NodesResult:  NewSafeChannelGen[*printStatus](original.Config.MaxChannelBuffer),
+	}
+
+	// 노드와 간선 복사
+	newNodes, newEdges := copyDag(original)
+	copied.nodes = newNodes
+	copied.Edges = newEdges
+
+	// 노드에 새 DAG 참조를 설정하고 시작/종료 노드 확인
+	for _, node := range newNodes {
+		node.parentDag = copied
+		switch node.ID {
+		case StartNode:
+			copied.StartNode = node
+		case EndNode:
+			copied.EndNode = node
+		}
+	}
+
+	return copied
 }
 
 // copyDag dag 를 복사함. 필요한것만 복사함.
@@ -1224,38 +1017,40 @@ func copyDag(original *Dag) (map[string]*Node, []*Edge) {
 		return nil, nil
 	}
 
-	// 1. 노드의 기본 정보(ID)만 복사한 새 맵 생성
+	// 1. 노드의 기본 정보(Id)만 복사한 새 맵 생성
 	newNodes := make(map[string]*Node, len(original.nodes))
 	for _, n := range original.nodes {
 		// 필요한 최소한의 정보만 복사
 		newNode := &Node{
-			Id: n.Id,
+			ID: n.ID, // ✅ Node 구조체가 Id로 되어 있다면 그대로 유지
 			// 기타 필드는 cycle 검증에 필요하지 않으므로 생략
 		}
-		newNodes[newNode.Id] = newNode
+		newNodes[newNode.ID] = newNode
 	}
+
 	// 2. 원본 노드의 부모/자식 관계를 이용하여 새 노드들의 포인터 연결
 	for _, n := range original.nodes {
-		newNode := newNodes[n.Id]
+		newNode := newNodes[n.ID]
 		// 부모 노드 연결
 		for _, parent := range n.parent {
-			if copiedParent, ok := newNodes[parent.Id]; ok {
+			if copiedParent, ok := newNodes[parent.ID]; ok {
 				newNode.parent = append(newNode.parent, copiedParent)
 			}
 		}
 		// 자식 노드 연결
 		for _, child := range n.children {
-			if copiedChild, ok := newNodes[child.Id]; ok {
+			if copiedChild, ok := newNodes[child.ID]; ok {
 				newNode.children = append(newNode.children, copiedChild)
 			}
 		}
 	}
-	// 3. 간선(Edge) 복사: detectCycle 에 필요하다면 parentId와 childId만 복사
+
+	// 3. 간선(Edge) 복사: parentID, childID만 복사
 	newEdges := make([]*Edge, len(original.Edges))
 	for i, e := range original.Edges {
 		newEdges[i] = &Edge{
-			parentId: e.parentId,
-			childId:  e.childId,
+			parentID: e.parentID, // ✅ 수정됨
+			childID:  e.childID,  // ✅ 수정됨
 			// vertex 등 기타 정보는 cycle 검증에 필요하지 않으므로 생략
 		}
 	}
@@ -1263,9 +1058,9 @@ func copyDag(original *Dag) (map[string]*Node, []*Edge) {
 	return newNodes, newEdges
 }
 
-func edgeExists(edges []*Edge, parentId, childId string) bool {
+func edgeExists(edges []*Edge, parentID, childID string) bool {
 	for _, edge := range edges {
-		if edge.parentId == parentId && edge.childId == childId {
+		if edge.parentID == parentID && edge.childID == childID {
 			return true
 		}
 	}

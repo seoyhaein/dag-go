@@ -7,45 +7,33 @@ import (
 	"time"
 )
 
-// TestCloneGraph: cloneGraph 함수 테스트 (기존 DAG 복사)
-/*func TestCloneGraph(t *testing.T) {
-	var copied map[string]*Node
-	dag := NewDag()
-	dag.AddEdge(dag.StartNode.Id, "1")
-	dag.AddEdge("1", "2")
-	dag.AddEdge("1", "3")
-	dag.AddEdge("1", "4")
-	dag.AddEdge("2", "5")
-	dag.AddEdge("5", "6")
-	dag.AddCommand("1", "")
-	dag.FinishDag()
-
-	copied, _ = cloneGraph(dag.nodes)
-
-	nCopied := len(copied)
-	nOriginal := len(dag.nodes)
-	fmt.Println("원래 노드 수 (예: 8가 나와야 정상):", nOriginal)
-	fmt.Println("복사된 노드 수 (예: 8가 나와야 정상):", nCopied)
-}*/
-
 // TestPreFlight_AllSucceed tests preFlight when all parent channels send Succeed.
 func TestPreFlight_AllSucceed(t *testing.T) {
 	ctx := context.Background()
 
-	node := &Node{Id: "node1"}
-	// 부모 채널 2개 생성 (버퍼 1)
-	ch1 := make(chan runningStatus, 1)
-	ch2 := make(chan runningStatus, 1)
-	ch1 <- Succeed
-	ch2 <- Succeed
-	node.parentVertex = []chan runningStatus{ch1, ch2}
+	node := &Node{ID: "node1"}
+
+	// 부모 SafeChannel 2개 생성 (버퍼 크기 1)
+	safeCh1 := NewSafeChannelGen[runningStatus](1)
+	safeCh2 := NewSafeChannelGen[runningStatus](1)
+
+	// 각 SafeChannel 에 Succeed 값을 전송
+	if !safeCh1.Send(Succeed) {
+		t.Fatal("Failed to send Succeed to safeCh1")
+	}
+	if !safeCh2.Send(Succeed) {
+		t.Fatal("Failed to send Succeed to safeCh2")
+	}
+
+	// 부모 채널 슬라이스에 할당
+	node.parentVertex = []*SafeChannel[runningStatus]{safeCh1, safeCh2}
 
 	ps := preFlight(ctx, node)
 	if ps.rStatus != Preflight {
 		t.Errorf("Expected status %v, got %v", Preflight, ps.rStatus)
 	}
-	if ps.nodeId != node.Id {
-		t.Errorf("Expected node id %s, got %s", node.Id, ps.nodeId)
+	if ps.nodeId != node.ID {
+		t.Errorf("Expected node id %s, got %s", node.ID, ps.nodeId)
 	}
 	if !node.IsSucceed() {
 		t.Error("Expected node.succeed to be true")
@@ -56,68 +44,32 @@ func TestPreFlight_AllSucceed(t *testing.T) {
 func TestPreFlight_OneFailed(t *testing.T) {
 	ctx := context.Background()
 
-	node := &Node{Id: "node2"}
-	// 부모 채널 2개: 하나는 Succeed, 하나는 Failed
-	ch1 := make(chan runningStatus, 1)
-	ch2 := make(chan runningStatus, 1)
-	ch1 <- Succeed
-	ch2 <- Failed
-	node.parentVertex = []chan runningStatus{ch1, ch2}
+	node := &Node{ID: "node2"}
+
+	// 부모 SafeChannel 2개 생성 (버퍼 크기 1)
+	safeCh1 := NewSafeChannelGen[runningStatus](1)
+	safeCh2 := NewSafeChannelGen[runningStatus](1)
+
+	// safeCh1에는 Succeed, safeCh2에는 Failed 값을 전송
+	if !safeCh1.Send(Succeed) {
+		t.Fatal("Failed to send Succeed to safeCh1")
+	}
+	if !safeCh2.Send(Failed) {
+		t.Fatal("Failed to send Failed to safeCh2")
+	}
+
+	// 부모 채널 슬라이스에 SafeChannel 포인터들을 할당
+	node.parentVertex = []*SafeChannel[runningStatus]{safeCh1, safeCh2}
 
 	ps := preFlight(ctx, node)
 	if ps.rStatus != PreflightFailed {
 		t.Errorf("Expected status %v, got %v", PreflightFailed, ps.rStatus)
 	}
-	if ps.nodeId != noNodeId {
+	if ps.nodeId != "node2" {
 		t.Errorf("Expected node id %s, got %s", noNodeId, ps.nodeId)
 	}
-	if !node.IsSucceed() {
-		t.Error("Expected node.succeed to be false")
-	}
-}
-
-// TestPreFlightT_AllSucceed tests preFlightT when all parent channels send Succeed.
-func TestPreFlightT_AllSucceed(t *testing.T) {
-	ctx := context.Background()
-
-	node := &Node{Id: "node3"}
-	ch1 := make(chan runningStatus, 1)
-	ch2 := make(chan runningStatus, 1)
-	ch1 <- Succeed
-	ch2 <- Succeed
-	node.parentVertex = []chan runningStatus{ch1, ch2}
-
-	ps := preFlight(ctx, node)
-	if ps.rStatus != Preflight {
-		t.Errorf("Expected status %v, got %v", Preflight, ps.rStatus)
-	}
-	if ps.nodeId != node.Id {
-		t.Errorf("Expected node id %s, got %s", node.Id, ps.nodeId)
-	}
-	if !node.IsSucceed() {
-		t.Error("Expected node.succeed to be true")
-	}
-}
-
-// TestPreFlightT_OneFailed tests preFlightT when one parent channel sends Failed.
-func TestPreFlightT_OneFailed(t *testing.T) {
-	ctx := context.Background()
-
-	node := &Node{Id: "node4"}
-	ch1 := make(chan runningStatus, 1)
-	ch2 := make(chan runningStatus, 1)
-	ch1 <- Succeed
-	ch2 <- Failed
-	node.parentVertex = []chan runningStatus{ch1, ch2}
-
-	ps := preFlight(ctx, node)
-	if ps.rStatus != PreflightFailed {
-		t.Errorf("Expected status %v, got %v", PreflightFailed, ps.rStatus)
-	}
-	if ps.nodeId != noNodeId {
-		t.Errorf("Expected node id %s, got %s", noNodeId, ps.nodeId)
-	}
-	if !node.IsSucceed() {
+	// 실패하였으므로 node 의 succeed 플래그는 false 여야 한다.
+	if node.IsSucceed() {
 		t.Error("Expected node.succeed to be false")
 	}
 }
@@ -126,16 +78,16 @@ func TestPreFlightT_OneFailed(t *testing.T) {
 func TestPreFlight_NoParents(t *testing.T) {
 	ctx := context.Background()
 
-	node := &Node{Id: "node5"}
-	// 부모 채널이 없는 경우
-	node.parentVertex = []chan runningStatus{}
+	node := &Node{ID: "node5"}
+	// 부모 채널이 없는 경우, 빈 SafeChannel 슬라이스 할당
+	node.parentVertex = []*SafeChannel[runningStatus]{}
 
 	ps := preFlight(ctx, node)
 	if ps.rStatus != Preflight {
 		t.Errorf("Expected status %v, got %v", Preflight, ps.rStatus)
 	}
-	if ps.nodeId != node.Id {
-		t.Errorf("Expected node id %s, got %s", node.Id, ps.nodeId)
+	if ps.nodeId != node.ID {
+		t.Errorf("Expected node id %s, got %s", node.ID, ps.nodeId)
 	}
 	if !node.IsSucceed() {
 		t.Error("Expected node.succeed to be true")
@@ -145,10 +97,11 @@ func TestPreFlight_NoParents(t *testing.T) {
 // TestPreFlight_ContextCancelled tests preFlight when the context is cancelled.
 func TestPreFlight_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	node := &Node{Id: "node6"}
-	// 부모 채널 하나 생성, 값을 보내지 않아 블록 상태 유도
-	ch := make(chan runningStatus, 1)
-	node.parentVertex = []chan runningStatus{ch}
+	node := &Node{ID: "node6"}
+
+	// 부모 SafeChannel 하나 생성 (버퍼 크기 1). 값을 보내지 않아 블록 상태 유도.
+	safeCh := NewSafeChannelGen[runningStatus](1)
+	node.parentVertex = []*SafeChannel[runningStatus]{safeCh}
 
 	// 컨텍스트 취소
 	cancel()
@@ -163,7 +116,7 @@ func TestPreFlight_ContextCancelled(t *testing.T) {
 		if ps.rStatus != PreflightFailed {
 			t.Errorf("Expected status %v due to context cancellation, got %v", PreflightFailed, ps.rStatus)
 		}
-		if node.succeed {
+		if node.IsSucceed() {
 			t.Error("Expected node.succeed to be false after context cancellation")
 		}
 	case <-time.After(100 * time.Millisecond):
@@ -175,7 +128,7 @@ func TestPreFlight_ContextCancelled(t *testing.T) {
 func TestPreFlight_AllSucceed_WithManyChannels(t *testing.T) {
 	ctx := context.Background()
 
-	node := &Node{Id: "node_async"}
+	node := &Node{ID: "node_async"}
 	// 예를 들어, 10개의 부모 채널을 비동기적으로 값 넣도록 생성
 	node.parentVertex = createParentChannels(10, Succeed)
 
@@ -183,8 +136,8 @@ func TestPreFlight_AllSucceed_WithManyChannels(t *testing.T) {
 	if ps.rStatus != Preflight {
 		t.Errorf("Expected status %v, got %v", Preflight, ps.rStatus)
 	}
-	if ps.nodeId != node.Id {
-		t.Errorf("Expected node id %s, got %s", node.Id, ps.nodeId)
+	if ps.nodeId != node.ID {
+		t.Errorf("Expected node id %s, got %s", node.ID, ps.nodeId)
 	}
 	if !node.IsSucceed() {
 		t.Error("Expected node.succeed to be true")
@@ -192,16 +145,17 @@ func TestPreFlight_AllSucceed_WithManyChannels(t *testing.T) {
 }
 
 // createParentChannels 는 n개의 채널을 생성하고, 각 채널에 비동기적으로 주어진 value 를 전송
-func createParentChannels(n int, value runningStatus) []chan runningStatus {
-	channels := make([]chan runningStatus, n)
+func createParentChannels(n int, value runningStatus) []*SafeChannel[runningStatus] {
+	channels := make([]*SafeChannel[runningStatus], n)
 	for i := 0; i < n; i++ {
-		ch := make(chan runningStatus, 1)
-		go func(c chan runningStatus) {
-			// 랜덤 딜레이 (0~10밀리초)로 실제 환경의 비동기성을 모사
-			time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
-			c <- value
-		}(ch)
-		channels[i] = ch
+		// SafeChannel 생성 (버퍼 크기 1)
+		sc := NewSafeChannelGen[runningStatus](1)
+		go func(sc *SafeChannel[runningStatus]) {
+			// 랜덤 딜레이 (0 ~ 10밀리초)로 실제 환경의 비동기성을 모사
+			time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond) // #nosec G404 -- acceptable for test timing jitter
+			sc.Send(value)
+		}(sc)
+		channels[i] = sc
 	}
 	return channels
 }
