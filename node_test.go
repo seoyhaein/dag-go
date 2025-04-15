@@ -32,8 +32,8 @@ func TestPreFlight_AllSucceed(t *testing.T) {
 	if ps.rStatus != Preflight {
 		t.Errorf("Expected status %v, got %v", Preflight, ps.rStatus)
 	}
-	if ps.nodeId != node.ID {
-		t.Errorf("Expected node id %s, got %s", node.ID, ps.nodeId)
+	if ps.nodeID != node.ID {
+		t.Errorf("Expected node id %s, got %s", node.ID, ps.nodeID)
 	}
 	if !node.IsSucceed() {
 		t.Error("Expected node.succeed to be true")
@@ -65,8 +65,8 @@ func TestPreFlight_OneFailed(t *testing.T) {
 	if ps.rStatus != PreflightFailed {
 		t.Errorf("Expected status %v, got %v", PreflightFailed, ps.rStatus)
 	}
-	if ps.nodeId != "node2" {
-		t.Errorf("Expected node id %s, got %s", noNodeId, ps.nodeId)
+	if ps.nodeID != "node2" {
+		t.Errorf("Expected node id %s, got %s", noNodeID, ps.nodeID)
 	}
 	// 실패하였으므로 node 의 succeed 플래그는 false 여야 한다.
 	if node.IsSucceed() {
@@ -86,16 +86,16 @@ func TestPreFlight_NoParents(t *testing.T) {
 	if ps.rStatus != Preflight {
 		t.Errorf("Expected status %v, got %v", Preflight, ps.rStatus)
 	}
-	if ps.nodeId != node.ID {
-		t.Errorf("Expected node id %s, got %s", node.ID, ps.nodeId)
+	if ps.nodeID != node.ID {
+		t.Errorf("Expected node id %s, got %s", node.ID, ps.nodeID)
 	}
 	if !node.IsSucceed() {
 		t.Error("Expected node.succeed to be true")
 	}
 }
 
-// TestPreFlight_ContextCancelled tests preFlight when the context is cancelled.
-func TestPreFlight_ContextCancelled(t *testing.T) {
+// TestPreFlight_ContextCancelled tests preFlight when the context is canceled.
+func TestPreFlight_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	node := &Node{ID: "node6"}
 
@@ -136,8 +136,8 @@ func TestPreFlight_AllSucceed_WithManyChannels(t *testing.T) {
 	if ps.rStatus != Preflight {
 		t.Errorf("Expected status %v, got %v", Preflight, ps.rStatus)
 	}
-	if ps.nodeId != node.ID {
-		t.Errorf("Expected node id %s, got %s", node.ID, ps.nodeId)
+	if ps.nodeID != node.ID {
+		t.Errorf("Expected node id %s, got %s", node.ID, ps.nodeID)
 	}
 	if !node.IsSucceed() {
 		t.Error("Expected node.succeed to be true")
@@ -147,7 +147,7 @@ func TestPreFlight_AllSucceed_WithManyChannels(t *testing.T) {
 // createParentChannels 는 n개의 채널을 생성하고, 각 채널에 비동기적으로 주어진 value 를 전송
 func createParentChannels(n int, value runningStatus) []*SafeChannel[runningStatus] {
 	channels := make([]*SafeChannel[runningStatus], n)
-	for i := 0; i < n; i++ {
+	for i := 0; i < n; i++ { //nolint:intrange
 		// SafeChannel 생성 (버퍼 크기 1)
 		sc := NewSafeChannelGen[runningStatus](1)
 		go func(sc *SafeChannel[runningStatus]) {

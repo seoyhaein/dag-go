@@ -2,6 +2,7 @@ package dag_go
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -48,10 +49,8 @@ func TestInitDag(t *testing.T) {
 	// NodesResult 채널(노드 결과 SafeChannel)의 용량 검사
 	if dag.NodesResult == nil {
 		t.Error("RunningStatus is nil")
-	} else {
-		if cap(dag.NodesResult.GetChannel()) != dag.Config.MaxChannelBuffer {
-			t.Errorf("Expected RunningStatus channel capacity to be %d, got %d", dag.Config.MaxChannelBuffer, cap(dag.NodesResult.GetChannel()))
-		}
+	} else if cap(dag.NodesResult.GetChannel()) != dag.Config.MaxChannelBuffer {
+		t.Errorf("Expected RunningStatus channel capacity to be %d, got %d", dag.Config.MaxChannelBuffer, cap(dag.NodesResult.GetChannel()))
 	}
 }
 
@@ -59,7 +58,7 @@ func TestInitDag(t *testing.T) {
 type DummyRunnable struct{}
 
 // DummyRunnable 이 Runnable 인터페이스를 구현하도록 필요한 메서드들을 정의
-func (d DummyRunnable) RunE(_ interface{}) error {
+func (_ DummyRunnable) RunE(_ interface{}) error {
 	return nil
 }
 
@@ -583,10 +582,7 @@ func TestDetectCycle(t *testing.T) {
 }
 
 func TestSimpleDag(t *testing.T) {
-	// runnable := Connect()
 	dag, _ := InitDag()
-	// dag.SetContainerCmd(runnable)
-
 	// 엣지 추가
 	if err := dag.AddEdge(dag.StartNode.ID, "1"); err != nil {
 		t.Fatalf("failed to add edge from StartNode to '1': %v", err)
@@ -698,7 +694,7 @@ func TestSimple1Dag(t *testing.T) {
 // 간단한 실행 명령을 위한 인터페이스 구현
 type SimpleCommand struct{}
 
-func (c *SimpleCommand) RunE(_ interface{}) error {
+func (_ *SimpleCommand) RunE(_ interface{}) error {
 	// 간단한 작업 시뮬레이션
 	time.Sleep(100 * time.Millisecond)
 	return nil
@@ -892,14 +888,14 @@ func generateDAG(numNodes int, edgeProb float64) *Dag {
 	dag.nodes = make(map[string]*Node, numNodes)
 
 	// 노드 생성: "0", "1", ..., "numNodes-1"
-	for i := 0; i < numNodes; i++ {
+	for i := 0; i < numNodes; i++ { //nolint:intrange
 		id := fmt.Sprintf("%d", i)
 		node := &Node{ID: id}
 		dag.nodes[id] = node
 	}
 
 	// 간선 생성: i < j 조건에서 edgeProb 확률로 간선 추가
-	for i := 0; i < numNodes; i++ {
+	for i := 0; i < numNodes; i++ { //nolint:intrange
 		for j := i + 1; j < numNodes; j++ {
 			if rand.Float64() < edgeProb { //nolint:gosec // test only, crypto-rand not required
 				parentID := fmt.Sprintf("%d", i)
@@ -974,7 +970,7 @@ func verifyCopiedDag(original *Dag, newNodes map[string]*Node, newEdges []*Edge,
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf(strings.Join(errs, "\n"))
+		return errors.New(strings.Join(errs, "\n"))
 	}
 	return nil
 }

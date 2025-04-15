@@ -40,7 +40,7 @@ const (
 )
 
 // It is the node ID when the condition that the node cannot be created.
-const noNodeId = "-1"
+const noNodeID = "-1"
 
 // ==================== 타입 정의 ====================
 
@@ -68,7 +68,7 @@ type (
 
 	printStatus struct {
 		rStatus runningStatus
-		nodeId  string
+		nodeID  string
 	}
 )
 
@@ -165,6 +165,8 @@ func InitDag() (*Dag, error) {
 }
 
 // InitDagWithOptions creates and initializes a new DAG with options.
+//
+//nolint:unused // This function is intentionally left for future use.
 func InitDagWithOptions(options ...DagOption) (*Dag, error) {
 	dag := NewDagWithOptions(options...)
 	if dag == nil {
@@ -174,6 +176,8 @@ func InitDagWithOptions(options ...DagOption) (*Dag, error) {
 }
 
 // WithTimeout 타임아웃 설정 옵션을 반환
+//
+//nolint:unused // This function is intentionally left for future use.
 func WithTimeout(timeout time.Duration) DagOption {
 	return func(dag *Dag) {
 		dag.Timeout = timeout
@@ -182,15 +186,19 @@ func WithTimeout(timeout time.Duration) DagOption {
 }
 
 // WithChannelBuffers 채널 버퍼 설정 옵션을 반환
-func WithChannelBuffers(min, max, status int) DagOption {
+//
+//nolint:unused // This function is intentionally left for future use.
+func WithChannelBuffers(minBuffer, maxBuffer, statusBuffer int) DagOption {
 	return func(dag *Dag) {
-		dag.Config.MinChannelBuffer = min
-		dag.Config.MaxChannelBuffer = max
-		dag.Config.StatusBuffer = status
+		dag.Config.MinChannelBuffer = minBuffer
+		dag.Config.MaxChannelBuffer = maxBuffer
+		dag.Config.StatusBuffer = statusBuffer
 	}
 }
 
 // WithWorkerPool 워커 풀 설정 옵션을 반환
+//
+//nolint:unused // This function is intentionally left for future use.
 func WithWorkerPool(size int) DagOption {
 	return func(dag *Dag) {
 		dag.Config.WorkerPoolSize = size
@@ -207,7 +215,7 @@ func NewDagWorkerPool(limit int) *DagWorkerPool {
 	}
 
 	// 워커 고루틴 시작
-	for i := 0; i < limit; i++ {
+	for i := 0; i < limit; i++ { //nolint:intrange
 		pool.wg.Add(1)
 		go func() {
 			defer pool.wg.Done()
@@ -277,6 +285,7 @@ func (dag *Dag) collectErrors(ctx context.Context) []error {
 	var errors []error
 
 	// 타임아웃 설정
+	//nolint:mnd // 추후 수정하자.
 	timeout := time.After(5 * time.Second)
 
 	for {
@@ -298,6 +307,7 @@ func (dag *Dag) collectErrors(ctx context.Context) []error {
 				}
 			} else {
 				// 에러가 없으면 짧게 대기
+				//nolint:mnd // 추후 수정하자.
 				time.Sleep(10 * time.Millisecond)
 			}
 		}
@@ -358,6 +368,8 @@ func (dag *Dag) closeChannels() {
 }
 
 // getSafeVertex returns the channel for the specified parent and child nodes.
+//
+//nolint:unused // This function is intentionally left for future use.
 func (dag *Dag) getSafeVertex(parentID, childID string) *SafeChannel[runningStatus] {
 	for _, v := range dag.Edges {
 		if v.parentID == parentID && v.childID == childID {
@@ -670,6 +682,8 @@ func (dag *Dag) FinishDag() error {
 }
 
 // visitReset resets the visited status of all nodes.
+//
+//nolint:unused // This function is intentionally left for future use.
 func (dag *Dag) visitReset() map[string]bool {
 	dag.mu.RLock()
 	defer dag.mu.RUnlock()
@@ -803,7 +817,7 @@ func (dag *Dag) Wait(ctx context.Context) bool {
 				return false
 			}
 			// EndNode 에 대한 상태만 체크함.
-			if c.nodeId == EndNode {
+			if c.nodeID == EndNode {
 				if c.rStatus == PreflightFailed ||
 					c.rStatus == InFlightFailed ||
 					c.rStatus == PostFlightFailed {
@@ -814,7 +828,7 @@ func (dag *Dag) Wait(ctx context.Context) bool {
 				}
 			}
 		case <-waitCtx.Done():
-			Log.Printf("DAG execution timed out or cancelled: %v", waitCtx.Err())
+			Log.Printf("DAG execution timed out or canceled: %v", waitCtx.Err())
 			return false
 		}
 	}
@@ -870,7 +884,7 @@ func connectRunner(n *Node) {
 		copyStatus := func(ps *printStatus) *printStatus {
 			return &printStatus{
 				rStatus: ps.rStatus,
-				nodeId:  ps.nodeId,
+				nodeID:  ps.nodeID,
 			}
 		}
 
@@ -918,6 +932,8 @@ func connectRunner(n *Node) {
 }
 
 // insertSafe inserts a value into a slice at the specified index. 지금은 사용하지 않지만 지우지 말것.
+//
+//nolint:unused // This function is intentionally left for future use.
 func insertSafe(a []*SafeChannel[*printStatus], index int, value *SafeChannel[*printStatus]) []*SafeChannel[*printStatus] {
 	if len(a) == index { // 빈 슬라이스이거나 마지막 요소 뒤에 삽입하는 경우
 		return append(a, value)
@@ -940,7 +956,7 @@ func (dag *Dag) merge(ctx context.Context) bool {
 // fanIn merges multiple channels into one.
 func fanIn(ctx context.Context, channels []*SafeChannel[*printStatus], merged *SafeChannel[*printStatus]) bool {
 	var wg sync.WaitGroup
-	var cancelled int32 // 0: 정상, 1: ctx.Done 발생
+	var canceled int32 // 0: 정상, 1: ctx.Done 발생
 
 	// 각 SafeChannel 의 내부 채널에서 값을 읽어와 merged SafeChannel 에 블로킹 전송
 	for _, sc := range channels {
@@ -951,7 +967,7 @@ func fanIn(ctx context.Context, channels []*SafeChannel[*printStatus], merged *S
 			for val := range sc.GetChannel() {
 				select {
 				case <-ctx.Done():
-					atomic.StoreInt32(&cancelled, 1)
+					atomic.StoreInt32(&canceled, 1)
 					return
 				case merged.GetChannel() <- val:
 					// 값 전송 성공하면 계속 진행
@@ -963,7 +979,7 @@ func fanIn(ctx context.Context, channels []*SafeChannel[*printStatus], merged *S
 	wg.Wait()
 
 	// cancellation 플래그가 설정되어 있으면 false, 아니면 true 리턴
-	return atomic.LoadInt32(&cancelled) == 0
+	return atomic.LoadInt32(&canceled) == 0
 }
 
 // min returns the minimum of two integers.

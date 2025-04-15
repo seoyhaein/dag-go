@@ -117,21 +117,23 @@ func (e *NodeError) Unwrap() error {
 // preFlight 노드의 실행 전 단계를 처리함
 func preFlight(ctx context.Context, n *Node) *printStatus {
 	if n == nil {
-		return newPrintStatus(PreflightFailed, noNodeId)
+		return newPrintStatus(PreflightFailed, noNodeID)
 	}
 
-	// TODO 실제 분석 파이프라인에서 테스트 해봐야 함. 부모 컨텍스트에서 타임아웃 설정 (30초; 추후 수정 가능)
+	// TODO 실제 분석 파이프라인에서 테스트 해봐야 함. 추후 수정 필요.
+	//nolint:mnd // 부모 컨텍스트에서 타임아웃 설정 30초
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	// errgroup 및 새로운 컨텍스트 생성
 	eg, egCtx := errgroup.WithContext(timeoutCtx)
+	//nolint:mnd // 10 is the fixed limit for concurrent goroutines. //TODO 향후 수정.
 	eg.SetLimit(10) // 동시 실행 고루틴 수 제한
 
 	i := len(n.parentVertex)
 	var try = true
 
-	for j := 0; j < i; j++ {
+	for j := 0; j < i; j++ { //nolint:intrange
 		k := j // closure 캡처 문제 해결
 		// SafeChannel 포인터를 가져옴. nil 체크 수행.
 		sc := n.parentVertex[k]
@@ -187,7 +189,7 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 // inFlight 노드의 실행 단계를 처리
 func inFlight(n *Node) *printStatus {
 	if n == nil {
-		return newPrintStatus(InFlightFailed, noNodeId)
+		return newPrintStatus(InFlightFailed, noNodeID)
 	}
 
 	if n.ID == StartNode || n.ID == EndNode {
@@ -224,7 +226,7 @@ func inFlight(n *Node) *printStatus {
 // postFlight 노드의 실행 후 단계를 처리함
 func postFlight(n *Node) *printStatus {
 	if n == nil {
-		return newPrintStatus(PostFlightFailed, noNodeId)
+		return newPrintStatus(PostFlightFailed, noNodeID)
 	}
 
 	// 종료 노드(EndNode)인 경우 별도로 처리
@@ -290,9 +292,11 @@ func execute(this *Node) error {
 }
 
 // checkVisit 모든 노드가 방문되었는지 확인함
+//
+//nolint:unused // This function is intentionally left for future use.
 func checkVisit(visit map[string]bool) bool {
 	for _, v := range visit {
-		if v == false {
+		if !v {
 			return false
 		}
 	}
@@ -300,6 +304,8 @@ func checkVisit(visit map[string]bool) bool {
 }
 
 // getNode 노드 맵에서 지정된 ID의 노드를 반환함
+//
+//nolint:unused // This function is intentionally left for future use.
 func getNode(s string, ns map[string]*Node) *Node {
 	if strings.TrimSpace(s) == "" {
 		return nil
@@ -313,6 +319,8 @@ func getNode(s string, ns map[string]*Node) *Node {
 }
 
 // getNextNode 첫 번째 자식 노드를 가져오고 해당 노드를 삭제함
+//
+//nolint:unused // This function is intentionally left for future use.
 func getNextNode(n *Node) *Node {
 	if n == nil {
 		return nil
@@ -326,7 +334,7 @@ func getNextNode(n *Node) *Node {
 	return ch
 }
 
-// printStatus 객체 풀
+// statusPool printStatus 객체 풀
 var statusPool = sync.Pool{
 	New: func() interface{} {
 		return &printStatus{}
@@ -337,13 +345,13 @@ var statusPool = sync.Pool{
 func newPrintStatus(status runningStatus, nodeID string) *printStatus {
 	ps := statusPool.Get().(*printStatus)
 	ps.rStatus = status
-	ps.nodeId = nodeID
+	ps.nodeID = nodeID
 	return ps
 }
 
 // releasePrintStatus printStatus 객체를 풀에 반환
 func releasePrintStatus(ps *printStatus) {
 	ps.rStatus = 0
-	ps.nodeId = ""
+	ps.nodeID = ""
 	statusPool.Put(ps)
 }
