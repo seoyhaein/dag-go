@@ -2,6 +2,7 @@ package dag_go
 
 import (
 	"context"
+	"go.uber.org/goleak"
 	"math/rand"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 
 // TestPreFlight_AllSucceed tests preFlight when all parent channels send Succeed.
 func TestPreFlight_AllSucceed(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	ctx := context.Background()
 
 	node := &Node{ID: "node1"}
@@ -42,6 +44,7 @@ func TestPreFlight_AllSucceed(t *testing.T) {
 
 // TestPreFlight_OneFailed tests preFlight when one parent channel sends Failed.
 func TestPreFlight_OneFailed(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	ctx := context.Background()
 
 	node := &Node{ID: "node2"}
@@ -76,6 +79,7 @@ func TestPreFlight_OneFailed(t *testing.T) {
 
 // TestPreFlight_NoParents tests preFlight when there are no parent channels.
 func TestPreFlight_NoParents(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	ctx := context.Background()
 
 	node := &Node{ID: "node5"}
@@ -96,6 +100,7 @@ func TestPreFlight_NoParents(t *testing.T) {
 
 // TestPreFlight_ContextCancelled tests preFlight when the context is canceled.
 func TestPreFlight_ContextCanceled(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	node := &Node{ID: "node6"}
 
@@ -126,6 +131,7 @@ func TestPreFlight_ContextCanceled(t *testing.T) {
 
 // TestPreFlight_AllSucceed_WithManyChannels tests preFlight with many asynchronous parent channels.
 func TestPreFlight_AllSucceed_WithManyChannels(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	ctx := context.Background()
 
 	node := &Node{ID: "node_async"}

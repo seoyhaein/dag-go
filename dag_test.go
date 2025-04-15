@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go.uber.org/goleak"
 	"math/rand"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 )
 
 func TestInitDag(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	// InitDag 호출하여 새로운 Dag 인스턴스 생성
 	dag, err := InitDag()
 	if err != nil {
@@ -63,6 +65,7 @@ func (_ DummyRunnable) RunE(_ interface{}) error {
 }
 
 func TestCreateNode(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	// -------------------------------
 	// Case 1: ContainerCmd 가 nil 인 경우
 	// -------------------------------
@@ -125,6 +128,7 @@ func TestCreateNode(t *testing.T) {
 }
 
 func TestCreateEdge(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	// 새로운 Dag 인스턴스 생성 (노드와 엣지 초기화)
 	dag := &Dag{
 		nodes: make(map[string]*Node),
@@ -186,6 +190,7 @@ func TestCreateEdge(t *testing.T) {
 
 // TestCreateEdge 이게 성공해야지 의미가 있음.
 func TestAddEdge(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	// 새로운 Dag 인스턴스 생성 (NewDag 사용)
 	dag := NewDag()
 	if dag == nil {
@@ -275,6 +280,7 @@ func TestAddEdge(t *testing.T) {
 
 // TestCopyDag 는 copyDag 함수가 노드 ID, 부모/자식 구조를 올바르게 복사하는지 검증하는 단위 테스트입니다.
 func TestCopyDag(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	// 1. 원본 DAG 생성 및 노드/간선 구성
 	dag := NewDag()
 
@@ -346,6 +352,7 @@ func TestCopyDag(t *testing.T) {
 
 // TestCopyDags 는 verifyCopiedDag 유틸리티를 사용하여 copyDag 의 동작을 검증합니다.
 func TestCopyDags(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	dag := NewDag()
 
 	nodeA := &Node{ID: "A"}
@@ -382,6 +389,7 @@ func TestCopyDags(t *testing.T) {
 }
 
 func TestManyCopyDags(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	// 여러 테스트 케이스: numNodes 와 edgeProb 를 조합
 	testCases := []struct {
 		numNodes int
@@ -416,6 +424,7 @@ func TestManyCopyDags(t *testing.T) {
 //
 //nolint:funlen // 이 테스트는 길지만 의도적으로 유지함
 func TestCopyDagIndependence(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	// 1. 원본 DAG 생성 및 초기화
 	orig := NewDag()
 	orig.ID = "orig-id"
@@ -541,6 +550,7 @@ func TestCopyDagIndependence(t *testing.T) {
 // TODO detectCycleDFS, DetectCycle 테스트 필요.
 
 func TestDetectCycle(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	// 새로운 DAG 생성
 	dag, _ := InitDag()
 
@@ -582,6 +592,7 @@ func TestDetectCycle(t *testing.T) {
 }
 
 func TestSimpleDag(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	dag, _ := InitDag()
 	// 엣지 추가
 	if err := dag.AddEdge(dag.StartNode.ID, "1"); err != nil {
@@ -623,6 +634,7 @@ func TestSimpleDag(t *testing.T) {
 }
 
 func TestSimple1Dag(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	// DAG 초기화
 	dag, err := InitDag()
 	if err != nil {
@@ -702,6 +714,7 @@ func (_ *SimpleCommand) RunE(_ interface{}) error {
 
 // TestComplexDag 는 복잡한 DAG 구조를 테스트합니다.
 func TestComplexDag(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	// DAG 초기화
 	dag, err := InitDag()
 	if err != nil {
@@ -762,6 +775,7 @@ func TestComplexDag(t *testing.T) {
 // TestErrorHandlingUsage 는 AddEdge 에서 발생하는 에러들을 통해
 // reportError 로 에러를 기록하고, collectErrors 로 수집하는 흐름을 검증
 func TestErrorHandlingUsage(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	// DAG 초기화 (기본 설정 사용)
 	dag, err := InitDag()
 	if err != nil {
@@ -807,6 +821,7 @@ func TestErrorHandlingUsage(t *testing.T) {
 
 // TestComplexDagProgress 는 다이아몬드 패턴 DAG 실행 전후로 Progress() 값을 검증
 func TestComplexDagProgress(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	// DAG 초기화
 	dag, err := InitDag()
 	if err != nil {
