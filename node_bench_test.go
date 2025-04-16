@@ -14,42 +14,50 @@ import (
 
 // setupNode 는 테스트를 위한 Node 와 parentVertex 채널들을 설정
 func setupNode(id string, numParents int, value runningStatus) *Node {
-	node := &Node{Id: id}
-	// numParents 개수만큼 부모 채널 생성 후 값을 비동기적으로 삽입
-	node.parentVertex = make([]chan runningStatus, numParents)
-	for i := 0; i < numParents; i++ {
-		ch := make(chan runningStatus, 1)
-		// 비동기적 값을 넣어서 실제 환경을 모사 (랜덤 딜레이 추가)
-		go func(c chan runningStatus) {
-			time.Sleep(time.Duration(rand.Intn(5)) * time.Millisecond)
-			c <- value
-		}(ch)
-		node.parentVertex[i] = ch
+	// Node 구조체 생성 및 parentVertex 슬라이스 초기화
+	node := &Node{
+		ID:           id,
+		parentVertex: make([]*SafeChannel[runningStatus], numParents),
 	}
+
+	// numParents 만큼 부모용 SafeChannel 생성 및 비동기적으로 값 전송
+	for i := 0; i < numParents; i++ {
+		// SafeChannel 생성 (버퍼 크기 1)
+		sc := NewSafeChannelGen[runningStatus](1)
+		go func(s *SafeChannel[runningStatus]) {
+			// 랜덤 딜레이 후 값을 전송
+			time.Sleep(time.Duration(rand.Intn(5)) * time.Millisecond)
+			s.Send(value)
+			// 값 전송 후 채널을 닫음
+			s.Close()
+		}(sc)
+		node.parentVertex[i] = sc
+	}
+
 	return node
 }
 
 func BenchmarkPreFlight(b *testing.B) {
-	// 로그가 있을 경우 출력결과물에 로그 기록이 남겨지는 것을 방지.
+	// 로그 기록이 벤치마크 결과에 영향을 주지 않도록 로그 출력 방지
 	Log.SetOutput(io.Discard)
 	ctx := context.Background()
-	// 예를 들어 부모 채널이 10개인 노드, 모두 Succeed 를 보내도록 설정
+	// 부모 SafeChannel 이 10개인 노드를 생성하며, 모두 Succeed 값을 보내도록 설정
 	node := setupNode("benchmark_preFlight", 10, Succeed)
 
-	// Warm-up: 벤치마크 루프 전에 한 번 실행하고, 부모 채널 재채움
+	// Warm-up: 벤치마크 루프 전에 한 번 실행하고, 이후 부모 채널을 재채움
 	_ = preFlight(ctx, node)
-	// 각 부모 채널에 Succeed 값을 다시 삽입
+	// 각 부모 SafeChannel 에 Succeed 값을 재삽입
 	for j := 0; j < len(node.parentVertex); j++ {
-		node.parentVertex[j] <- Succeed
+		node.parentVertex[j].Send(Succeed)
 	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = preFlight(ctx, node)
-		// 매 반복 후 부모 채널을 다시 채워 다음 반복에 대비
+		// 각 반복 후 부모 채널을 다시 채워 다음 반복에 대비
 		for j := 0; j < len(node.parentVertex); j++ {
-			node.parentVertex[j] <- Succeed
+			node.parentVertex[j].Send(Succeed)
 		}
 	}
 }
