@@ -1,0 +1,393 @@
+{
+  //========================================================
+  // Pipeline Spec — Block-Referenced + Explicit Inputs (JSONC)
+  //========================================================
+  // 본 문서는 클라이언트(UI)가 서버에 전달하는 실행 템플릿이다.
+  // - inputsFromBlocks: FileBlock(blockId)만으로 참조 → [SERVER]가 row별 fanout 실행/입력 해석
+  // - inputs: 명시형 입력(원격 URI/스테이징/캐시) → [SERVER]가 materialize 후 바인드
+  // - nodes: OverlayFS 기반 단계 실행 (start → 1 → 2/3/4 → 5 → 6 → end)
+  //
+  // 주석 역할 구분:
+  //   [CLIENT]  : 클라이언트(UI)가 설정/전송
+  //   [SERVER]  : 서버가 해석/치환/주입/검증
+  //   [COMMON]  : 공통 정책/값(서버도 존중, 클라가 기본 제공 가능)
+
+  //========================
+  // 0) 메타데이터
+  //========================
+  "schemaVersion": "1.0",                        // [COMMON] 스키마 버전
+  "id": "pipelineA",                             // [CLIENT] 파이프라인 템플릿 ID
+  "runId": "AUTO",                               // [SERVER] 실행 시점에 생성/주입 (예: 20250822-130000-xyz)
+  "name": "Pipeline A",                          // [CLIENT] 표시용 이름
+  "createdAt": "2025-08-22T04:00:00Z",           // [CLIENT] 생성 시각(서버가 재기록 가능)
+  "createdBy": "alice@example.com",              // [CLIENT] 작성자
+  "metadata": {                                  // [COMMON] 자유 메타
+    "project": "genome-analysis",
+    "version": "v1.0"
+  },
+
+  //========================
+  // 1) 스토리지(Overlay) 정책
+  //========================
+  "storage": {                                   // [COMMON] 경로 템플릿은 공통, 실제 값은 [SERVER] 치환
+    "type": "overlay",
+    "pathStrategy": "template",
+    "mountStrategy": "host-overlay-bind",
+    "common": {
+      "baseDir": "/mnt/overlay",                 // [COMMON]
+      "lowerDir": "@baseDir/lower",              // [COMMON] 공용 lower (ref/샘플 등)
+      "mergedBase": "@baseDir/@id/@runId/merged" // [COMMON] 실행별 merged 루트 (@id, @runId는 [SERVER] 치환)
+    }
+  },
+
+  //========================
+  // 2) 입력 바인딩 정책
+  //========================
+  "inputsPolicy": {
+    "autobindAllTasks": false,                   // [COMMON]
+    "mode": "ro",                                // [COMMON] 컨테이너에 읽기전용 바인드
+    "target": "container",                       // [COMMON]
+    "defaultContainerDir": "/mnt",               // [COMMON]
+    "defaultAttachNodes": ["1"],                 // [COMMON] 기본 바인드 대상 노드
+    "overridePerInput": true,                    // [COMMON]
+    "pathNaming": { "containerPathFrom": "inputName" } // [COMMON] inputName을 컨테이너 파일명으로 사용
+  },
+
+  //======================================================================
+  // 3) A안: 파일 블록 참조형 입력 — blockId만으로 row별 fanout 실행 (권장)
+  //======================================================================
+  "inputsFromBlocks": [
+    {
+      "blockId": "/test/baba"                    // [CLIENT] UI에서 고른 FileBlock ID(= 디렉토리 루트)
+      // [SERVER] 동작:
+      //  1) blockId로 FileBlock 조회 → rows[] / cells{R1,R2,...} 확보
+      //  2) row 수만큼 실행 인스턴스 fanout(perRow) 생성 (runId 뒤에 -row001 등 suffix 부여)
+      //  3) 각 실행의 inputs[] 생성 규칙:
+      //       - hostPath = join(blockId, cells["R1"|"R2"])
+      //       - name = "sample_R1.fastq" / "sample_R2.fastq" (또는 정책에 따른 이름)
+      //       - containerPath = "/mnt/<name>"  (inputsPolicy 규칙)
+      //       - attach.nodes = ["1"]
+      //  4) header 오타/불일치 시 cells의 실제 key 집합(R1/R2 등)을 신뢰
+      //  5) single-end면 R1만, paired-end면 R1/R2 모두 필요 (부재 row는 스킵/실패 정책)
+    }
+  ],
+
+  //================================================================================
+  // 4) B안: 명시형 입력(선택) — 원격 URI/스테이징/캐시 전략을 위해 병행 사용 권장
+  //================================================================================
+  "inputs": [
+    {
+      "name": "sample_R1.fastq",                  // [COMMON] 컨테이너 내 파일명에도 사용
+      // "hostPath": "/data/samples/set1/R1.fastq.gz",       // [LEGACY] 로컬 즉시 바인드 경로(선택)
+      "uri": "file:///data/samples/set1/R1.fastq.gz",        // [CLIENT] 로컬 file://, 원격 s3://, oras:// 등
+      "attach": { "nodes": ["1"] },               // [COMMON] 바인드 대상 노드
+      "staging": {                                // [SERVER] 스테이징/캐시 지시어
+        "strategy": "bind-or-copy",               // bind | copy | bind-or-copy | stream
+        "destTemplate": "/var/stage/@runId/@name",// copy/stream 시 복사 목적지 템플릿
+        "computeChecksum": "sha256",              // 스테이징 후 무결성 기록(옵션)
+        "preferCache": true                       // 동일 콘텐츠 캐시 재사용
+      },
+      "accessMode": "ro"                          // [COMMON]
+    },
+    {
+      "name": "sample_R2.fastq",
+      "uri": "s3://my-bucket/set1/R2.fastq.gz",   // [CLIENT] 예시: 원격 S3
+      "attach": { "nodes": ["1"] },
+      "staging": {
+        "strategy": "copy",                       // S3 → 로컬 스테이징 강제
+        "destTemplate": "/var/stage/@runId/@name",
+        "computeChecksum": "sha256",
+        "preferCache": true
+      },
+      "accessMode": "ro"
+    }
+  ],
+
+  //========================================================
+  // 5) inputsFromBlocks vs inputs 병합/우선순위 정책
+  //========================================================
+  "inputsResolution": {
+    "mode": "augment",                            // augment | override | blocksOnly
+    // augment    : inputsFromBlocks 해석 결과 + inputs 모두 사용(이름 충돌 시 아래 규칙 적용)
+    // override   : 이름이 겹치면 명시형 inputs가 우선(클라 명시값으로 덮어씀)
+    // blocksOnly : inputsFromBlocks만 사용(명시형 inputs는 무시)
+    "onNameCollision": "preferInputs",            // preferInputs | preferBlocks | error
+    "validateExistence": true                     // [SERVER] 실행 전 실제 존재/접근성 검증
+  },
+
+  //===================================
+  // 6) 전역 스테이징/캐시 정책(선택)
+  //===================================
+  "stagingPolicy": {
+    "workDir": "/var/stage/@runId",               // [SERVER] 기본 스테이징 루트
+    "defaultStrategy": "bind-or-copy",            // [SERVER] per-input 미지정시 사용
+    "concurrency": 2,                             // [SERVER] 병렬 스테이징 개수 제한
+    "cache": {
+      "enabled": true,
+      "dir": "/var/cache/sori",                   // [SERVER] 콘텐츠 주소 기반 캐시 권장
+      "by": "checksum"                            // checksum | uri | mtime
+    }
+  },
+
+  //========================
+  // 7) 환경/정리 정책
+  //========================
+  "envDefaults": { "TMPDIR": ".tmp", "XDG_CACHE_HOME": ".cache", "HOME": "." }, // [COMMON]
+  "cleanupPolicy": { "onSuccess": "remove", "onFailure": "retain" },            // [COMMON]
+
+  //========================
+  // 8) 그래프/노드 정의
+  //========================
+  "nodes": {                                      // [CLIENT] UI가 만드는 템플릿(서버는 그대로 실행/복제)
+    "start": {
+      "type": "start",
+      "ui": { "position": { "x": 400, "y": 50 } },     // [CLIENT] 에디터 좌표
+      "graph": { "dependsOn": [] },                     // [COMMON]
+      "storage": {
+        "host": { "upperDir": null, "workDir": null, "mergedDir": null, "lowerDirs": [] }, // [COMMON]
+        "containerPath": null
+      },
+      "container": {
+        "image": "alpine:latest",                       // [COMMON]
+        "env": { "runId": "AUTO" },                     // [SERVER] runId 주입 (start 스크립트에서 사용)
+        "resources": {
+          "limits": { "cpu": "250m", "memory": "256Mi" },
+          "requests": { "cpu": "250m", "memory": "256Mi" }
+        },
+        "userScript": "#!/bin/sh\nset -eu\nRUN_DIR=\"/overlay/${runId}\"\nmkdir -p /overlay/lower \"$RUN_DIR\" \"$RUN_DIR/merged\"\nfor i in 1 2 3 4 5 6; do\n  mkdir -p \"$RUN_DIR/${i}-upper\" \"$RUN_DIR/${i}-work\" \"$RUN_DIR/merged/$i/.tmp\" \"$RUN_DIR/merged/$i/.cache\"\ndone\necho \"start: prepared directories under $RUN_DIR\" > \"$RUN_DIR/merged/1/START_READY.txt\" || true\n",
+        "mounts": [
+          { "type": "bind", "hostPath": "/mnt/overlay", "containerPath": "/overlay" } // [COMMON]
+        ]
+      }
+    },
+
+    "1": {
+      "type": "task",
+      "ui": { "position": { "x": 400, "y": 180 } },     // [CLIENT]
+      "graph": { "dependsOn": ["start"] },              // [COMMON]
+      "storage": {
+        "host": {
+          "upperDir": "@baseDir/@runId/@nodeId-upper",  // [SERVER] 템플릿 치환
+          "workDir": "@baseDir/@runId/@nodeId-work",    // [SERVER]
+          "mergedDir": "@baseDir/@id/@runId/merged/@nodeId", // [SERVER]
+          "lowerDirs": ["@baseDir/lower"]               // [SERVER]
+        },
+        "containerPath": "/data/step1"                  // [COMMON]
+      },
+      "container": {
+        "image": "pipeline_imgA:latest",
+        "env": {
+          "TMPDIR": "/data/step1/.tmp",
+          "XDG_CACHE_HOME": "/data/step1/.cache",
+          "HOME": "/data/step1"
+        },
+        "resources": {
+          "limits": { "cpu": "500m", "memory": "512Mi" },
+          "requests": { "cpu": "500m", "memory": "512Mi" }
+        },
+        "userScript": "#!/bin/sh\nset -eu\nOUT=/data/step1\nmkdir -p \"$OUT\"\necho \"A: generated $(date -u +%FT%TZ)\" > \"$OUT/A.txt\"\nif [ -f /mnt/sample_R1.fastq ]; then bytes=$(wc -c < /mnt/sample_R1.fastq); echo \"sample_R1.fastq bytes=$bytes\" >> \"$OUT/input_info.txt\"; else echo \"sample_R1.fastq=N/A\" >> \"$OUT/input_info.txt\"; fi\nif [ -f /mnt/sample_R2.fastq ]; then bytes=$(wc -c < /mnt/sample_R2.fastq); echo \"sample_R2.fastq bytes=$bytes\" >> \"$OUT/input_info.txt\"; else echo \"sample_R2.fastq=N/A\" >> \"$OUT/input_info.txt\"; fi\nls -la \"$OUT\" > \"$OUT/list1.txt\"\necho \"node1: done\" >&2\n",
+        "mounts": [
+          { "type": "volume", "name": "ref-fa", "hostPath": "/data/ref.fa", "containerPath": "/mnt/ref.fa", "accessMode": "ro" } // [COMMON]
+        ]
+      }
+    },
+
+    "2": {
+      "type": "task",
+      "ui": { "position": { "x": 100, "y": 280 } },     // [CLIENT]
+      "graph": { "dependsOn": ["1"] },                  // [COMMON]
+      "storage": {
+        "host": {
+          "upperDir": "@baseDir/@runId/@nodeId-upper",
+          "workDir": "@baseDir/@runId/@nodeId-work",
+          "mergedDir": "@baseDir/@id/@runId/merged/@nodeId",
+          "lowerDirs": ["@baseDir/@id/@runId/merged/1", "@baseDir/lower"]
+        },
+        "containerPath": "/data/step2"
+      },
+      "container": {
+        "image": "pipeline_img1:latest",
+        "env": {
+          "TMPDIR": "/data/step2/.tmp",
+          "XDG_CACHE_HOME": "/data/step2/.cache",
+          "HOME": "/data/step2"
+        },
+        "resources": {
+          "limits": { "cpu": "500m", "memory": "512Mi" },
+          "requests": { "cpu": "500m", "memory": "512Mi" }
+        },
+        "userScript": "#!/bin/sh\nset -eu\nINOUT=/data/step2\n[ -f \"$INOUT/A.txt\" ] || { echo \"node2: missing A.txt from node1\" >&2; exit 1; }\ncp \"$INOUT/A.txt\" \"$INOUT/A_from_1.txt\"\necho \"B: generated $(date -u +%FT%TZ)\" > \"$INOUT/B.txt\"\nls -1 \"$INOUT\" > \"$INOUT/list2.txt\"\necho \"node2: ok\" >&2\n",
+        "mounts": [
+          { "type": "volume", "name": "ref-fa", "hostPath": "/data/ref.fa", "containerPath": "/mnt/ref.fa", "accessMode": "ro" }
+        ]
+      }
+    },
+
+    "3": {
+      "type": "task",
+      "ui": { "position": { "x": 400, "y": 280 } },     // [CLIENT]
+      "graph": { "dependsOn": ["1"] },                  // [COMMON]
+      "storage": {
+        "host": {
+          "upperDir": "@baseDir/@runId/@nodeId-upper",
+          "workDir": "@baseDir/@runId/@nodeId-work",
+          "mergedDir": "@baseDir/@id/@runId/merged/@nodeId",
+          "lowerDirs": ["@baseDir/@id/@runId/merged/1", "@baseDir/lower"]
+        },
+        "containerPath": "/data/step3"
+      },
+      "container": {
+        "image": "pipeline_img2:latest",
+        "env": {
+          "TMPDIR": "/data/step3/.tmp",
+          "XDG_CACHE_HOME": "/data/step3/.cache",
+          "HOME": "/data/step3"
+        },
+        "resources": {
+          "limits": { "cpu": "500m", "memory": "512Mi" },
+          "requests": { "cpu": "500m", "memory": "512Mi" }
+        },
+        "userScript": "#!/bin/sh\nset -eu\nINOUT=/data/step3\n[ -f \"$INOUT/A.txt\" ] || { echo \"node3: missing A.txt from node1\" >&2; exit 1; }\necho \"C: generated $(date -u +%FT%TZ)\" > \"$INOUT/C.txt\"\nls -1 \"$INOUT\" > \"$INOUT/list3.txt\"\necho \"node3: ok\" >&2\n",
+        "mounts": [
+          { "type": "volume", "name": "ref-fa", "hostPath": "/data/ref.fa", "containerPath": "/mnt/ref.fa", "accessMode": "ro" }
+        ]
+      }
+    },
+
+    "4": {
+      "type": "task",
+      "ui": { "position": { "x": 700, "y": 280 } },     // [CLIENT]
+      "graph": { "dependsOn": ["1"] },                  // [COMMON]
+      "storage": {
+        "host": {
+          "upperDir": "@baseDir/@runId/@nodeId-upper",
+          "workDir": "@baseDir/@runId/@nodeId-work",
+          "mergedDir": "@baseDir/@id/@runId/merged/@nodeId",
+          "lowerDirs": ["@baseDir/@id/@runId/merged/1", "@baseDir/lower"]
+        },
+        "containerPath": "/data/step4"
+      },
+      "container": {
+        "image": "pipeline_img3:latest",
+        "env": {
+          "TMPDIR": "/data/step4/.tmp",
+          "XDG_CACHE_HOME": "/data/step4/.cache",
+          "HOME": "/data/step4"
+        },
+        "resources": {
+          "limits": { "cpu": "500m", "memory": "512Mi" },
+          "requests": { "cpu": "500m", "memory": "512Mi" }
+        },
+        "userScript": "#!/bin/sh\nset -eu\nINOUT=/data/step4\n[ -f \"$INOUT/A.txt\" ] || { echo \"node4: missing A.txt from node1\" >&2; exit 1; }\necho \"D: generated $(date -u +%FT%TZ)\" > \"$INOUT/D.txt\"\nls -1 \"$INOUT\" > \"$INOUT/list4.txt\"\necho \"node4: ok\" >&2\n",
+        "mounts": [
+          { "type": "volume", "name": "ref-fa", "hostPath": "/data/ref.fa", "containerPath": "/mnt/ref.fa", "accessMode": "ro" }
+        ]
+      }
+    },
+
+    "5": {
+      "type": "task",
+      "ui": { "position": { "x": 100, "y": 380 } },     // [CLIENT]
+      "graph": { "dependsOn": ["2"] },                  // [COMMON]
+      "storage": {
+        "host": {
+          "upperDir": "@baseDir/@runId/@nodeId-upper",
+          "workDir": "@baseDir/@runId/@nodeId-work",
+          "mergedDir": "@baseDir/@id/@runId/merged/@nodeId",
+          "lowerDirs": ["@baseDir/@id/@runId/merged/2", "@baseDir/lower"]
+        },
+        "containerPath": "/data/step5"
+      },
+      "container": {
+        "image": "pipeline_imgB:latest",
+        "env": {
+          "TMPDIR": "/data/step5/.tmp",
+          "XDG_CACHE_HOME": "/data/step5/.cache",
+          "HOME": "/data/step5"
+        },
+        "resources": {
+          "limits": { "cpu": "500m", "memory": "512Mi" },
+          "requests": { "cpu": "500m", "memory": "512Mi" }
+        },
+        "userScript": "#!/bin/sh\nset -eu\nINOUT=/data/step5\n[ -f \"$INOUT/B.txt\" ] || { echo \"node5: missing B.txt from node2\" >&2; exit 1; }\necho \"E: generated $(date -u +%FT%TZ)\" > \"$INOUT/E.txt\"\nls -1 \"$INOUT\" > \"$INOUT/list5.txt\"\necho \"node5: ok\" >&2\n",
+        "mounts": [
+          { "type": "volume", "name": "ref-fa", "hostPath": "/data/ref.fa", "containerPath": "/mnt/ref.fa", "accessMode": "ro" }
+        ]
+      }
+    },
+
+    "6": {
+      "type": "task",
+      "ui": { "position": { "x": 550, "y": 380 } },     // [CLIENT]
+      "graph": { "dependsOn": ["3", "4", "5"] },        // [COMMON]
+      "storage": {
+        "host": {
+          "upperDir": "@baseDir/@runId/@nodeId-upper",
+          "workDir": "@baseDir/@runId/@nodeId-work",
+          "mergedDir": "@baseDir/@id/@runId/merged/@nodeId",
+          "lowerDirs": [
+            "@baseDir/@id/@runId/merged/3",
+            "@baseDir/@id/@runId/merged/4",
+            "@baseDir/@id/@runId/merged/5",
+            "@baseDir/lower"
+          ]
+        },
+        "containerPath": "/data/step6"
+      },
+      "container": {
+        "image": "pipeline_imgC:latest",
+        "env": {
+          "TMPDIR": "/data/step6/.tmp",
+          "XDG_CACHE_HOME": "/data/step6/.cache",
+          "HOME": "/data/step6"
+        },
+        "resources": {
+          "limits": { "cpu": "500m", "memory": "512Mi" },
+          "requests": { "cpu": "500m", "memory": "512Mi" }
+        },
+        "userScript": "#!/bin/sh\nset -eu\nINOUT=/data/step6\nfor f in C.txt D.txt E.txt; do\n  [ -f \"$INOUT/$f\" ] || { echo \"node6: missing $f from predecessors\" >&2; exit 1; }\ndone\n{\n  echo \"summary generated $(date -u +%FT%TZ)\";\n  echo \"--- C.txt ---\"; cat \"$INOUT/C.txt\";\n  echo \"--- D.txt ---\"; cat \"$INOUT/D.txt\";\n  echo \"--- E.txt ---\"; cat \"$INOUT/E.txt\";\n} > \"$INOUT/summary.txt\"\nls -1 \"$INOUT\" > \"$INOUT/list6.txt\"\necho \"node6: ok\" >&2\n",
+        "mounts": [
+          { "type": "volume", "name": "ref-fa", "hostPath": "/data/ref.fa", "containerPath": "/mnt/ref.fa", "accessMode": "ro" }
+        ]
+      }
+    },
+
+    "end": {
+      "type": "end",
+      "ui": { "position": { "x": 400, "y": 480 } },     // [CLIENT]
+      "graph": { "dependsOn": ["6"] },                  // [COMMON]
+      "storage": {
+        "host": { "upperDir": null, "workDir": null, "mergedDir": null, "lowerDirs": [] },
+        "containerPath": null
+      },
+      "container": {
+        "image": "alpine:latest",
+        "resources": {
+          "limits": { "cpu": "250m", "memory": "256Mi" },
+          "requests": { "cpu": "250m", "memory": "256Mi" }
+        },
+        "userScript": "#!/bin/sh\nset -eu\necho \"end: pipeline finished\" >&2\n",
+        "mounts": []
+      }
+    }
+  },
+
+  //========================
+  // 9) 실행 전략
+  //========================
+  "execution": {
+    "fanout": "perRow",                           // [COMMON] FileBlock의 각 row를 별도 실행으로 분기
+    "setKeyTemplate": "row-%03d"                  // [SERVER] runId 뒤에 붙일 키(예: row-001)로 경로 충돌 방지
+  }
+
+  //========================================================
+  // [SERVER] 실행 스냅샷에 아래 예시 메타 추가(감사/재현성)
+  // "resolvedInputsMeta": [
+  //   { "source": {"type": "block", "blockId": "/test/baba", "row": 1, "column": "R1"},
+  //     "uri": "file:///test/baba/SRA_S1_L002_R1_001.fastq.gz",
+  //     "materializedPath": "/var/stage/20250822-130000-xyz/sample_R1.fastq",
+  //     "checksum": {"algo": "sha256", "value": "..."},
+  //     "size": 123456789 }
+  // ]
+  //========================================================
+}
