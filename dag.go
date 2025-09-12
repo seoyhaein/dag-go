@@ -647,6 +647,7 @@ func (dag *Dag) FinishDag() error {
 	if dag.EndNode == nil {
 		return logErr(fmt.Errorf("failed to create end node"))
 	}
+	// TODO 일단 여기서 무조건 성공을 넣어 버리는데 end 노드에서 향후 리소스 초기화 과정을 거쳐야 하기때문에 이 부분은 수정해줘야 한다.
 	dag.EndNode.SetSucceed(true)
 
 	// 각 노드에 대해 검증 및 종료 노드로의 연결 작업 수행
@@ -893,6 +894,8 @@ func connectRunner(n *Node) {
 			ps := newPrintStatus(PostFlightFailed, n.ID)
 			// 복사본을 만들어 SafeChannel 에 전송
 			result.Send(copyStatus(ps))
+			n.SetStatus(NodeStatusSkipped)
+			n.notifyChildren(Failed)
 			releasePrintStatus(ps)
 			return
 		}
@@ -904,6 +907,7 @@ func connectRunner(n *Node) {
 		result.Send(copyStatus(ps))
 		if ps.rStatus == PreflightFailed {
 			n.SetStatus(NodeStatusFailed)
+			n.notifyChildren(Failed)
 			releasePrintStatus(ps)
 			return
 		}
@@ -914,6 +918,7 @@ func connectRunner(n *Node) {
 		result.Send(copyStatus(ps))
 		if ps.rStatus == InFlightFailed {
 			n.SetStatus(NodeStatusFailed)
+			n.notifyChildren(Failed)
 			releasePrintStatus(ps)
 			return
 		}

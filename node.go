@@ -285,6 +285,12 @@ func (n *Node) Execute() (err error) {
 	return nil
 }
 
+func (n *Node) notifyChildren(st runningStatus) {
+	for _, sc := range n.childrenVertex {
+		_ = sc.Send(st)
+	}
+}
+
 // execute RunCommand 실행
 func execute(this *Node) error {
 	err := this.RunCommand.RunE(this)
