@@ -115,6 +115,7 @@ func (e *NodeError) Unwrap() error {
 }
 
 // preFlight 노드의 실행 전 단계를 처리함
+// TODO preFlight의 30초 하드코딩 타임아웃 이거 개선해야 함.
 func preFlight(ctx context.Context, n *Node) *printStatus {
 	if n == nil {
 		return newPrintStatus(PreflightFailed, noNodeID)
