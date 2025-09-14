@@ -12,6 +12,8 @@
   //   [SERVER]  : 서버가 해석/치환/주입/검증
   //   [COMMON]  : 공통 정책/값(서버도 존중, 클라가 기본 제공 가능)
 
+  // 중요. pipeline 같은 경우, 이걸 자동으로 만들어 주는 부분도 중요한 부분임. 최적화 해줘야 하는 문제가 있음. 따라서 이 최적화에 따라 go 코드도 수정되어야 하는 지겨운 작업이 필요함.
+
   //========================
   // 0) 메타데이터
   //========================
@@ -139,8 +141,8 @@
   // 8) 그래프/노드 정의
   //========================
   "nodes": {                                      // [CLIENT] UI가 만드는 템플릿(서버는 그대로 실행/복제)
-    "start": {
-      "type": "start",
+    "init": {
+      "type": "init",
       "ui": { "position": { "x": 400, "y": 50 } },     // [CLIENT] 에디터 좌표
       "graph": { "dependsOn": [] },                     // [COMMON]
       "storage": {
@@ -164,7 +166,7 @@
     "1": {
       "type": "task",
       "ui": { "position": { "x": 400, "y": 180 } },     // [CLIENT]
-      "graph": { "dependsOn": ["start"] },              // [COMMON]
+      "graph": { "dependsOn": ["init"] },              // [COMMON]
       "storage": {
         "host": {
           "upperDir": "@baseDir/@runId/@nodeId-upper",  // [SERVER] 템플릿 치환
@@ -352,8 +354,8 @@
       }
     },
 
-    "end": {
-      "type": "end",
+    "finalize": {
+      "type": "finalize",
       "ui": { "position": { "x": 400, "y": 480 } },     // [CLIENT]
       "graph": { "dependsOn": ["6"] },                  // [COMMON]
       "storage": {

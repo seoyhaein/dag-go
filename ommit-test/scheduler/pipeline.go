@@ -3,9 +3,12 @@ package scheduler
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strings"
 )
 
 // template pipeline 에서 데이터만 붙으면 런타임 파이프라인으로 갈 수 있어야 함.
@@ -29,10 +32,12 @@ type Node struct {
 }
 
 type GraphSpec struct {
-	DependsOn []string `json:"dependsOn"`
+	DependsOn []string            `json:"dependsOn"`
+	depSet    map[string]struct{} // 내부용
 }
 
 // ParsePipeline json 파싱.
+// TODO 생각하기 중요. 템플릿 파이프라인을 만들어 주는데, 일단 런타임 파이프라인은 다르게 처리해주어야 함.
 func ParsePipeline(r io.Reader) (*Pipeline, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -51,6 +56,11 @@ func ParsePipeline(r io.Reader) (*Pipeline, error) {
 			n.ID = id
 		}
 	}
+
+	if err := NormalizeDepends(&p); err != nil {
+		return nil, fmt.Errorf("normalize: %w", err)
+	}
+
 	return &p, nil
 }
 
@@ -132,4 +142,44 @@ func stripJSONComments(in []byte) []byte {
 		out.WriteByte(c)
 	}
 	return out.Bytes()
+}
+
+func NormalizeDepends(p *Pipeline) error {
+	if p == nil || len(p.Nodes) == 0 {
+		return errors.New("invalid pipeline")
+	}
+	for id, n := range p.Nodes {
+		if n == nil {
+			return fmt.Errorf("node %q is nil", id)
+		}
+		deps := n.Graph.DependsOn
+		seen := make(map[string]struct{}, len(deps))
+		out := deps[:0] // 백킹 배열 재사용
+
+		for _, dep := range deps {
+			dep = strings.TrimSpace(dep)
+			if dep == "" {
+				continue
+			}
+			if dep == id {
+				return fmt.Errorf("node %q depends on itself", id)
+			}
+			if _, ok := p.Nodes[dep]; !ok {
+				return fmt.Errorf("node %q depends on unknown %q", id, dep)
+			}
+			if _, dup := seen[dep]; dup {
+				continue
+			}
+			seen[dep] = struct{}{}
+			out = append(out, dep)
+		}
+
+		// 결정론: 항상 같은 순서로 고정 (테스트/해시 안정)
+		sort.Strings(out)
+
+		// 정규화 결과 반영 + 내부 캐시
+		n.Graph.DependsOn = out
+		n.Graph.depSet = seen // 추후 확장성을 위해서 일단 남겨둠.
+	}
+	return nil
 }

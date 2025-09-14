@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+// TestParsePipeline_JSONC_SetsIDs tests that ParsePipeline correctly parses a JSONC input and sets node IDs.
+// 테스트 코드에 다소 오류가 있지만 넘어간다.
 func TestParsePipeline_JSONC_SetsIDs(t *testing.T) {
 	input := `{
   // top-level comment
@@ -137,6 +139,53 @@ func TestParsePipeline_JSONC_SetsIDs(t *testing.T) {
 		}
 		if n.ID != id {
 			t.Fatalf("node %q has ID %q (want %q)", id, n.ID, id)
+		}
+	}
+}
+
+func TestParsePipeline0(t *testing.T) {
+	p, err := ParsePipelineFile("../pipeline.jsonc")
+	if err != nil {
+		t.Fatalf("ParsePipelineFile error: %v", err)
+	}
+	if p == nil {
+		t.Fatal("got nil pipeline")
+	}
+	if len(p.Nodes) == 0 {
+		t.Fatal("pipeline has no nodes")
+	}
+
+	// 노드 ID/의존성 정합성 확인 (NormalizeDepends 결과 기준)
+	for id, n := range p.Nodes {
+		if n == nil {
+			t.Fatalf("node %q is nil", id)
+		}
+		if n.ID != id {
+			t.Fatalf("node %q has mismatched ID field: got %q", id, n.ID)
+		}
+
+		prev := ""
+		seen := make(map[string]struct{}, len(n.Graph.DependsOn))
+		for i, dep := range n.Graph.DependsOn {
+			if dep == "" {
+				t.Fatalf("node %q has empty dependsOn at index %d", id, i)
+			}
+			if dep == id {
+				t.Fatalf("node %q depends on itself", id)
+			}
+			if _, ok := p.Nodes[dep]; !ok {
+				t.Fatalf("node %q depends on unknown node %q", id, dep)
+			}
+			if _, dup := seen[dep]; dup {
+				t.Fatalf("node %q dependsOn contains duplicate %q", id, dep)
+			}
+			seen[dep] = struct{}{}
+
+			// NormalizeDepends 에서 sort.Strings(out)로 정렬했는지 체크
+			if i > 0 && prev > dep {
+				t.Fatalf("node %q dependsOn not sorted: %q before %q", id, prev, dep)
+			}
+			prev = dep
 		}
 	}
 }

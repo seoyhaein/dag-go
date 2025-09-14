@@ -4,92 +4,34 @@ import (
 	"errors"
 	"fmt"
 	dag_go "github.com/seoyhaein/dag-go"
+	"sort"
 )
 
+// 추후 package
 // pipeline 이 들어오면 dag 로 바꿔줌.
+// scheduler 와 grpc 통신 해줘야 함.
 
-// BuildDagFromPipeline ParsePipeline로 얻은 *Pipeline을 DAG로 변환
-// TODO 일단 dag-go 에서는 StartNode, EndNode 를 직접 넣어 주었는데, 여기서 json 에서 start 노드와 end 노드가 있어서 중복되어 버림.
+// BuildDagFromPipeline ParsePipeline로 얻은 *Pipeline을 DAG로 변환 TODO 테스트 진행.
 func BuildDagFromPipeline(p *Pipeline, dagOpts ...dag_go.DagOption) (*dag_go.Dag, error) {
-	if p == nil {
-		return nil, errors.New("pipeline is nil")
-	}
-	if len(p.Nodes) == 0 {
-		return nil, errors.New("pipeline has no nodes")
+	if p == nil || len(p.Nodes) == 0 {
+		return nil, errors.New("pipeline is nil or empty")
 	}
 
-	// 1) DAG 생성 (StartNode 포함)
+	// DAG 생성 (StartNode 포함)
 	dag, err := dag_go.InitDagWithOptions(dagOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("init dag: %w", err)
 	}
 
-	// 2) 파이프라인 노드 선생성
+	// 노드 ID 결정론 순회 준비
+	ids := make([]string, 0, len(p.Nodes))
 	for id := range p.Nodes {
-		if id == "" {
-			return nil, fmt.Errorf("empty node id in pipeline")
-		}
-		if dag.CreateNode(id) == nil {
-			// 이미 존재 → 중복 id 가능성 or Start/End 예약어 충돌
-			// (StartNode/EndNode는 내부 예약어이므로 피하는 게 안전)
-			return nil, fmt.Errorf("failed to create node: %s (duplicate or reserved?)", id)
-		}
+		ids = append(ids, id)
 	}
+	sort.Strings(ids)
 
-	// 3) 의존성 검증 + 엣지 생성(dep -> node)
-	inDeg := make(map[string]int, len(p.Nodes))
-	for id := range p.Nodes {
-		inDeg[id] = 0
-	}
-	for id, n := range p.Nodes {
-		for _, dep := range n.Graph.DependsOn {
-			if _, ok := p.Nodes[dep]; !ok {
-				return nil, fmt.Errorf("node %q depends on unknown node %q", id, dep)
-			}
-			if err := dag.AddEdge(dep, id); err != nil {
-				return nil, fmt.Errorf("add edge %s->%s: %w", dep, id, err)
-			}
-			inDeg[id]++
-		}
-	}
-
-	// 4) 루트(의존 0)들을 StartNode에 연결
-	for id, deg := range inDeg {
-		if deg == 0 {
-			// 파이프라인 JSON에 type:"start"가 있든 없든,
-			// 실행의 진입점은 내부 StartNode로 통일하는 편이 깔끔.
-			if err := dag.AddEdge(dag_go.StartNode, id); err != nil {
-				return nil, fmt.Errorf("connect start->%s: %w", id, err)
-			}
-		}
-	}
-
-	// 5) FinishDag: leaf→EndNode 연결 + 사이클 검사
-	if err := dag.FinishDag(); err != nil {
-		return nil, fmt.Errorf("finish dag: %w", err)
-	}
-
-	return dag, nil
-}
-
-// BuildDagFromPipelineA TODO 테스트 진행
-// BuildDagFromPipelineA TODO 테스트 진행.
-func BuildDagFromPipelineA(p *Pipeline, dagOpts ...dag_go.DagOption) (*dag_go.Dag, error) {
-	if p == nil {
-		return nil, errors.New("pipeline is nil")
-	}
-	if len(p.Nodes) == 0 {
-		return nil, errors.New("pipeline has no nodes")
-	}
-
-	// 1) DAG 생성 (StartNode 포함)
-	dag, err := dag_go.InitDagWithOptions(dagOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("init dag: %w", err)
-	}
-
-	// 2) 파이프라인 노드 선생성 (+ 예약어 차단)
-	for id := range p.Nodes {
+	// 파이프라인 노드 선생성 (+ 예약어 차단, StartNode, EndNode)
+	for _, id := range ids {
 		if id == "" {
 			return nil, fmt.Errorf("empty node id in pipeline")
 		}
@@ -101,28 +43,17 @@ func BuildDagFromPipelineA(p *Pipeline, dagOpts ...dag_go.DagOption) (*dag_go.Da
 		}
 	}
 
-	// 3) 의존성 검증 + 엣지 생성(dep -> node), 디듀프 + in/out degree 집계
+	// 의존성 엣지 생성 + in/out degree 집계 (JSON 정규화 기준) inDeg 는 부모, outDeg 자식 부모가 0 이면 루트, 자식이 0이면 리프
 	inDeg := make(map[string]int, len(p.Nodes))
 	outDeg := make(map[string]int, len(p.Nodes))
-	for id := range p.Nodes {
+	for _, id := range ids {
 		inDeg[id] = 0
 		outDeg[id] = 0
 	}
-
-	for id, n := range p.Nodes {
-		seen := make(map[string]struct{}, len(n.Graph.DependsOn))
+	for _, id := range ids {
+		n := p.Nodes[id]
+		// n.Graph.DependsOn 은 NormalizeDepends 에서 이미 정렬/디듀프/검증됨
 		for _, dep := range n.Graph.DependsOn {
-			if dep == id {
-				return nil, fmt.Errorf("node %q depends on itself", id)
-			}
-			if _, ok := p.Nodes[dep]; !ok {
-				return nil, fmt.Errorf("node %q depends on unknown node %q", id, dep)
-			}
-			if _, dup := seen[dep]; dup {
-				continue // 중복 의존성 무시
-			}
-			seen[dep] = struct{}{}
-
 			if err := dag.AddEdgeIfNodesExist(dep, id); err != nil {
 				return nil, fmt.Errorf("add edge %s->%s: %w", dep, id, err)
 			}
@@ -131,56 +62,70 @@ func BuildDagFromPipelineA(p *Pipeline, dagOpts ...dag_go.DagOption) (*dag_go.Da
 		}
 	}
 
-	// 4) init/finalize 후보 결정 (이름 규약: "start"=init, "end"=finalize)
-	initID, hasInit := "", false
-	if _, ok := p.Nodes["start"]; ok {
-		initID, hasInit = "start", true
-	}
-	finalizeID, hasFinalize := "", false
-	if _, ok := p.Nodes["end"]; ok {
-		finalizeID, hasFinalize = "end", true
-	}
-
-	// 5) 루트(의존 0) 연결: init 있으면 StartNode->init, init->roots; 없으면 StartNode->roots
-	if hasInit {
-		if err := dag.AddEdgeIfNodesExist(dag_go.StartNode, initID); err != nil {
-			return nil, fmt.Errorf("connect start_node->%s: %w", initID, err)
-		}
-		for id, deg := range inDeg {
-			if deg == 0 && id != initID {
-				if err := dag.AddEdgeIfNodesExist(initID, id); err != nil {
-					return nil, fmt.Errorf("connect %s->%s: %w", initID, id, err)
-				}
-				// 참고: in/outDeg 업데이트는 선택사항(아래 리프 계산은 JSON 기준 outDeg만 사용)
+	// init/finalize 탐색(타입 기반, 고유성 보장) 중복일때 오류 검증.
+	var (
+		initID, finalizeID   string
+		hasInit, hasFinalize bool
+	)
+	for _, id := range ids {
+		switch p.Nodes[id].Type {
+		case "init":
+			if hasInit {
+				return nil, fmt.Errorf("multiple init nodes: %q and %q", initID, id)
 			}
-		}
-	} else {
-		for id, deg := range inDeg {
-			if deg == 0 {
-				if err := dag.AddEdgeIfNodesExist(dag_go.StartNode, id); err != nil {
-					return nil, fmt.Errorf("connect start_node->%s: %w", id, err)
-				}
+			initID, hasInit = id, true
+		case "finalize":
+			if hasFinalize {
+				return nil, fmt.Errorf("multiple finalize nodes: %q and %q", finalizeID, id)
 			}
+			finalizeID, hasFinalize = id, true
 		}
 	}
 
-	// 6) 리프(자식 0) 연결: finalize 있으면 (모든 리프)->finalize
-	//    리프 판단은 JSON 의존성 기준 outDeg==0으로 결정 (중복 엣지 방지에 유리)
+	// 제약: init은 루트(inDeg==0), finalize는 리프(outDeg==0)
+	if !hasInit {
+		return nil, fmt.Errorf("init node (type==\"init\") is required")
+	}
+	if inDeg[initID] != 0 {
+		return nil, fmt.Errorf("init node %q must not have dependencies (inDeg=%d)", initID, inDeg[initID])
+	}
+	if hasFinalize && outDeg[finalizeID] != 0 {
+		return nil, fmt.Errorf("finalize node %q must not be a dependency of any node (outDeg=%d)", finalizeID, outDeg[finalizeID])
+	}
+
+	// 루트 연결: StartNode->init, init->(모든 루트)
+	if err := dag.AddEdgeIfNodesExist(dag_go.StartNode, initID); err != nil {
+		return nil, fmt.Errorf("connect start_node->%s: %w", initID, err)
+	}
+	for _, id := range ids {
+		if id == initID {
+			continue
+		}
+		if inDeg[id] == 0 {
+			if err := dag.AddEdgeIfNodesExist(initID, id); err != nil {
+				return nil, fmt.Errorf("connect %s->%s: %w", initID, id, err)
+			}
+		}
+	}
+
+	// 리프 → finalize (있을 때만) — JSON 기준 outDeg==0
 	if hasFinalize {
-		for id, out := range outDeg {
-			if out == 0 && id != finalizeID {
+		for _, id := range ids {
+			if id == finalizeID {
+				continue
+			}
+			if outDeg[id] == 0 {
 				if err := dag.AddEdgeIfNodesExist(id, finalizeID); err != nil {
 					return nil, fmt.Errorf("connect %s->%s: %w", id, finalizeID, err)
 				}
 			}
 		}
-		// FinishDag 가 finalize -> EndNode 를 자동으로 연결해준다 (finalize가 리프가 되므로)
+		// finalize는 리프가 되므로 FinishDag가 finalize->EndNode 연결
 	}
 
-	// 7) FinishDag: leaf→EndNode 연결 + 사이클 검사
+	// FinishDag: leaf→EndNode 연결 + 사이클 검사
 	if err := dag.FinishDag(); err != nil {
 		return nil, fmt.Errorf("finish dag: %w", err)
 	}
-
 	return dag, nil
 }
