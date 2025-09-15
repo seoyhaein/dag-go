@@ -1,6 +1,13 @@
 package scheduler
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"fmt"
+	dag_go "github.com/seoyhaein/dag-go"
+	"testing"
+	"time"
+)
 
 // helper: JSON 정규화된 파이프라인에서 in/out degree 계산
 func degrees(p *Pipeline) (map[string]int, map[string]int) {
@@ -112,4 +119,107 @@ func TestBuildDagFromPipeline0(t *testing.T) {
 	// if dag_go.DetectCycle(dag) {
 	// 	t.Fatal("cycle detected in DAG")
 	// }
+}
+
+// 10초 후 성공을 리턴하는 목(mock) 러너
+type mockRunner struct{}
+
+func (mockRunner) RunE(n *dag_go.Node) error {
+	time.Sleep(10 * time.Second)
+	return nil
+}
+
+func TestPipeline_RunWithMockSpawner(t *testing.T) {
+	p, _ := ParsePipelineFile("../pipeline.jsonc")
+	_, _ = BuildDagFromPipeline(p /*, (옵션이 있으면 여기 추가) */)
+
+}
+
+// TODO RunE 를 node 의 정보를 가져와서,
+// TODO 컨테이너를 만들어주는 api 로 재작성 하면 됨.
+// TODO 기타, 여러 부가적인 기능들을 만들어주면 될듯하다.
+
+// 전역/노드 주입용 러너들: 실행 시 해당 노드 ID를 출력
+// Runnable 구현: a를 *Node로 캐스팅해 ID 출력
+type echoOK struct{ d time.Duration }
+
+func (r echoOK) RunE(a interface{}) error 
+func (r echoOK) RunE(a interface{}) error {
+	id := "<unknown>"
+	if n, ok := a.(*dag_go.Node); ok && n != nil {
+		id = n.ID
+	}
+	fmt.Printf("[RunE OK] node=%s sleep=%s\n", id, r.d)
+	time.Sleep(r.d)
+	return nil
+}
+
+nc (r echoFail) RunE(a interface{}) err
+type echoFail struct{ d time.Duration }
+func (r echoFail) RunE(a interface{}) error {
+	id := "<unknown>"
+	if n, ok := a.(*dag_go.Node); ok && n != nil {
+		id = n.ID
+	}
+	fmt.Printf("[RunE FAIL] node=%s sleep=%s\n", id, r.d)
+	time.Sleep(r.d)
+	return errors.New("mock failure")
+}
+
+// 전역 주입 + 특정 노드 오버라이드(모두 성공)
+func TestDAG_GlobalAndPerNodeInjection_PrintIDs_Success(t *testing.T) {
+	dag, err := dag_go.InitDag()
+	if err != nil {
+		t.Fatalf("InitDag error: %v", err)
+	}
+
+	// DAG 전역 러너 주입: 기본은 100ms 후 성공, 각 노드 실행 시 ID 출력됨
+	dag.SetContainerCmd(echoOK{d: 100 * time.Millisecond})
+
+	// 노드 생성
+	a := dag.CreateNode("A")
+	b1 := dag.CreateNode("B1")
+	b2 := dag.CreateNode("B2")
+	c := dag.CreateNode("C")
+
+	// 엣지 연결: start -> A -> (B1,B2) -> C -> end(자동 연결됨)
+	if err := dag.AddEdge(dag_go.StartNode, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := dag.AddEdge(a.ID, b1.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := dag.AddEdge(a.ID, b2.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := dag.AddEdge(b1.ID, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := dag.AddEdge(b2.ID, c.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 노드별 주입: B2만 더 긴 딜레이로 오버라이드(실행 시 node=B2 출력)
+	b2.RunCommand = echoOK{d: 300 * time.Millisecond}
+
+	// 실행
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+	if !dag.ConnectRunner() {
+		t.Fatal("ConnectRunner failed")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if !dag.GetReady(ctx) {
+		t.Fatal("GetReady failed")
+	}
+	if !dag.Start() {
+		t.Fatal("Start failed")
+	}
+	if !dag.Wait(ctx) {
+		t.Fatal("Wait failed (expected success)")
+	}
 }
