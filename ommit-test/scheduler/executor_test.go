@@ -143,7 +143,6 @@ func TestPipeline_RunWithMockSpawner(t *testing.T) {
 // Runnable 구현: a를 *Node로 캐스팅해 ID 출력
 type echoOK struct{ d time.Duration }
 
-func (r echoOK) RunE(a interface{}) error 
 func (r echoOK) RunE(a interface{}) error {
 	id := "<unknown>"
 	if n, ok := a.(*dag_go.Node); ok && n != nil {
@@ -154,8 +153,8 @@ func (r echoOK) RunE(a interface{}) error {
 	return nil
 }
 
-nc (r echoFail) RunE(a interface{}) err
 type echoFail struct{ d time.Duration }
+
 func (r echoFail) RunE(a interface{}) error {
 	id := "<unknown>"
 	if n, ok := a.(*dag_go.Node); ok && n != nil {
