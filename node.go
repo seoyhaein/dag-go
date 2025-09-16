@@ -273,19 +273,16 @@ func postFlight(n *Node) *printStatus {
 
 // createNode 새로운 노드를 생성
 func createNode(id string, r Runnable) *Node {
-	return &Node{
-		ID:         id,
-		RunCommand: r,
-		status:     NodeStatusPending,
-	}
+	n := &Node{ID: id, status: NodeStatusPending}
+	n.runnerStore(r) // 첫 Store (non-nil 포인터 래퍼)
+	return n
 }
 
 // createNodeWithID ID 만으로 새로운 노드를 생성
 func createNodeWithID(id string) *Node {
-	return &Node{
-		ID:     id,
-		status: NodeStatusPending,
-	}
+	n := &Node{ID: id, status: NodeStatusPending}
+	n.runnerStore(nil) // 첫 Store (nil 러너라도 래퍼는 non-nil)
+	return n
 }
 
 // TODO 생각해보기 timeout 은 여기 들어가야 하는게 맞을듯.

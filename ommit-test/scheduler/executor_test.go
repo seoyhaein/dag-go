@@ -200,7 +200,8 @@ func TestDAG_GlobalAndPerNodeInjection_PrintIDs_Success(t *testing.T) {
 	}
 
 	// 노드별 주입: B2만 더 긴 딜레이로 오버라이드(실행 시 node=B2 출력)
-	b2.RunCommand = echoOK{d: 300 * time.Millisecond}
+	b2.SetRunner(echoOK{d: 300 * time.Millisecond})
+	//b2.RunCommand = echoOK{d: 300 * time.Millisecond}
 
 	// 실행
 	if err := dag.FinishDag(); err != nil {

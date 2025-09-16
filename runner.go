@@ -19,6 +19,7 @@ type runnerSlot struct{ r Runnable }
 func (n *Node) runnerStore(r Runnable) { // 항상 *runnerSlot만 저장
 	n.runnerVal.Store(&runnerSlot{r: r})
 }
+
 func (n *Node) runnerLoad() Runnable {
 	v := n.runnerVal.Load()
 	if v == nil {
@@ -64,4 +65,16 @@ func (n *Node) getRunnerSnapshot() Runnable {
 		}
 	}
 	return base
+}
+
+func (n *Node) SetRunner(r Runnable) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.status != NodeStatusPending {
+		// 이미 실행 중/완료/스킵이면 거부
+		return false
+	}
+	n.runnerStore(r)
+	return true
 }

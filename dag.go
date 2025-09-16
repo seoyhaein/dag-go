@@ -226,9 +226,10 @@ func (dag *Dag) SetNodeRunner(id string, r Runnable) bool {
 
 	switch n.status {
 	case NodeStatusPending:
-		// TODO 백워드 호환을 위해서 넣어둠. 향후 삭제하는 방향으로 진행해야 함.
-		n.RunCommand = r
-		n.runnerStore(r) // atomic.Value에는 *runnerSlot만 Store
+
+		n.SetRunner(r)
+		//n.RunCommand = r
+		//n.runnerStore(r) // atomic.Value에는 *runnerSlot만 Store
 		return true
 
 	case NodeStatusRunning, NodeStatusSucceeded, NodeStatusFailed, NodeStatusSkipped:
