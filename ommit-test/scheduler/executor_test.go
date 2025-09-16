@@ -130,6 +130,7 @@ func (mockRunner) RunE(n *dag_go.Node) error {
 	return nil
 }
 
+// TODO BuildDagFromPipeline 를 사용해서 SetRunner 하기 하자.
 func TestPipeline_RunWithMockSpawner(t *testing.T) {
 	p, _ := ParsePipelineFile("../pipeline.jsonc")
 	_, _ = BuildDagFromPipeline(p /*, (옵션이 있으면 여기 추가) */)
