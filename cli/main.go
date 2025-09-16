@@ -3,8 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/seoyhaein/dag-go"
 	"time"
+
+	"github.com/seoyhaein/dag-go"
 )
 
 // TODO 이건 별도로 테스트 서버에서 해야함. 내 개발 노트북에서 하면 뻗음.
