@@ -3,12 +3,13 @@ package dag_go
 import (
 	"context"
 	"fmt"
-	"golang.org/x/sync/errgroup"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	// (do not erase) goroutine 디버깅용
 	"github.com/dlsniper/debugger"
@@ -27,9 +28,21 @@ const (
 
 // Node DAG 의 기본 구성 요소
 type Node struct {
-	ID         string
-	ImageName  string
+	ID        string
+	ImageName string
+
+	// deprecated: RunCommand 는 더 이상 사용되지 않음.
 	RunCommand Runnable
+
+	// 추가 : 안전한 동시성 처리: 러너 스냅샷을 위한 atomic.Value
+	// (지우지 말것 ) atomic.Value 는 개발시 주의가 필요함. 해당 내용을 잘 이해하고 있어야함.
+	// 이건 항상 immutable 한 값을 저장하는 용도로만 사용해야 함.
+	// 포인터를 저장하는 용도로만 사용하고, 값 타입은 피할 것.
+	// 반드시 첫 Store는 non-nil : n.runnerVal.Store(&runnerSlot{})처럼 포인터 래퍼 자체는 non-nil이면 OK. (래퍼 내부의 인터페이스 r는 nil이어도 됨)
+	// 복사 금지: atomic.Value는 “첫 사용 이후엔 복사 금지”가 원칙이라, Node를 값 복사하는 패턴은 피하세요(포인터로 다루기).
+	// 동시성: Load/Store는 다중 고루틴에서 동시에 호출해도 안전, CAS 에 관해서는 별도의 노션으로 정리하자.일단 readme 에 남겨둠.
+
+	runnerVal atomic.Value // stores *runnerSlot
 
 	children  []*Node // 자식 노드 리스트
 	parent    []*Node // 부모 노드 리스트
@@ -215,7 +228,7 @@ func inFlight(n *Node) *printStatus {
 		Log.Println("Skipping execution for node", n.ID, "due to previous failure")
 	}
 
-	// 최종 결과 판단: 일반 노드의 경우에만 succeed 값을 비교합니다.
+	// 최종 결과 판단: 일반 노드의 경우에만 succeed 값을 비교
 	if n.IsSucceed() {
 		Log.Println("InFlight", n.ID)
 		return newPrintStatus(InFlight, n.ID)
@@ -278,24 +291,23 @@ func createNodeWithID(id string) *Node {
 // TODO 생각해보기 timeout 은 여기 들어가야 하는게 맞을듯.
 
 // Execute 노드의 실행 로직을 구현
-func (n *Node) Execute() (err error) {
-	if n.RunCommand != nil {
-		err = execute(n)
-		return
+func (n *Node) Execute() error {
+	return execute(n)
+}
+
+// execute RunCommand 실행
+func execute(this *Node) error {
+	r := this.getRunnerSnapshot() // 실행 직전 러너 스냅샷
+	if r == nil {
+		return ErrNoRunner // 명시적 실패 가드
 	}
-	return nil
+	return r.RunE(this)
 }
 
 func (n *Node) notifyChildren(st runningStatus) {
 	for _, sc := range n.childrenVertex {
 		_ = sc.Send(st)
 	}
-}
-
-// execute RunCommand 실행
-func execute(this *Node) error {
-	err := this.RunCommand.RunE(this)
-	return err
 }
 
 // checkVisit 모든 노드가 방문되었는지 확인함

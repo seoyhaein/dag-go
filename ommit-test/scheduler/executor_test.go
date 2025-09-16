@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	dag_go "github.com/seoyhaein/dag-go"
 	"testing"
 	"time"
+
+	dag_go "github.com/seoyhaein/dag-go"
 )
 
 // helper: JSON 정규화된 파이프라인에서 in/out degree 계산

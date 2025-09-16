@@ -3,11 +3,12 @@ package dag_go
 import (
 	"context"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/seoyhaein/utils"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/seoyhaein/utils"
 )
 
 // TODO context 확인해야 함.
@@ -97,7 +98,12 @@ type Dag struct {
 	Timeout  time.Duration
 	bTimeout bool
 
+	// TODO 확인할 것 -추가
+	// 전역 기본 러너(실행 시점 반영용)
 	ContainerCmd Runnable
+
+	// Resolver
+	runnerResolver RunnerResolver
 
 	// 추가된 필드
 	Config         DagConfig
@@ -139,7 +145,7 @@ func NewDagWithConfig(config DagConfig) *Dag {
 		ID:          uuid.NewString(),
 		NodesResult: NewSafeChannelGen[*printStatus](config.MaxChannelBuffer),
 		Config:      config,
-		Errors:      make(chan error, config.MaxChannelBuffer), // 에러 채널 초기화
+		Errors:      make(chan error, config.MaxChannelBuffer),
 	}
 }
 
@@ -162,6 +168,119 @@ func InitDag() (*Dag, error) {
 		return nil, fmt.Errorf("failed to run NewDag")
 	}
 	return dag.StartDag()
+}
+
+// ==================== 전역 러너/리졸버 ====================
+
+// SetContainerCmd sets the container command for the DAG.
+func (dag *Dag) SetContainerCmd(r Runnable) {
+	// dag.ContainerCmd = r
+
+	// 수정
+	dag.mu.Lock()
+	dag.ContainerCmd = r
+	dag.mu.Unlock()
+
+}
+
+// loadDefaultRunnerAtomic 추가
+/*func (dag *Dag) loadDefaultRunnerAtomic() Runnable {
+	v := dag.defVal.Load()
+	if v == nil {
+		return nil
+	}
+	return v.(*runnerSlot).r
+}*/
+
+// SetRunnerResolver  Dag 에 Resolver 보관
+func (dag *Dag) SetRunnerResolver(rr RunnerResolver) {
+	// dag.runnerResolver = rr
+
+	// 수정
+	dag.mu.Lock()
+	dag.runnerResolver = rr
+	dag.mu.Unlock()
+}
+
+// 원자적으로 Resolver 반환
+/*func (dag *Dag) loadRunnerResolverAtomic() RunnerResolver {
+	// rrVal은 단지 "초기화 여부"를 위한 타입 고정용이고,
+	// 실제 rr는 락으로 보호된 dag.runnerResolver에서 읽는다.
+	// TODO 완전히 락-프리로 하려면 rrVal에 rr 자체를 담는 별도 래퍼 타입을 써야 함.
+	dag.mu.RLock()
+	rr := dag.runnerResolver
+	dag.mu.RUnlock()
+	return rr
+}*/
+
+func (dag *Dag) SetNodeRunner(id string, r Runnable) bool {
+	dag.mu.RLock()
+	n := dag.nodes[id]
+	dag.mu.RUnlock()
+	if n == nil {
+		return false
+	}
+
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	switch n.status {
+	case NodeStatusPending:
+		// TODO 백워드 호환을 위해서 넣어둠. 향후 삭제하는 방향으로 진행해야 함.
+		n.RunCommand = r
+		n.runnerStore(r) // atomic.Value에는 *runnerSlot만 Store
+		return true
+
+	case NodeStatusRunning, NodeStatusSucceeded, NodeStatusFailed, NodeStatusSkipped:
+		// 선택: 이유를 로깅해두면 추적이 쉬움
+		Log.Infof("SetNodeRunner ignored: node %s status=%v", n.ID, n.status)
+		return false
+
+	default:
+		// 혹시 모를 새 상태 대비
+		Log.Warnf("SetNodeRunner unknown status: node %s status=%v", n.ID, n.status)
+		return false
+	}
+}
+
+func (dag *Dag) SetNodeRunners(m map[string]Runnable) (applied int, missing, skipped []string) {
+	dag.mu.RLock()
+	defer dag.mu.RUnlock()
+
+	for id, r := range m {
+		// 실행 노드가 아닌 특수 노드 방어
+		if id == StartNode || id == EndNode {
+			skipped = append(skipped, id)
+			continue
+		}
+
+		n := dag.nodes[id]
+		if n == nil {
+			missing = append(missing, id)
+			continue
+		}
+
+		n.mu.Lock()
+		switch n.status {
+		case NodeStatusPending:
+			// TODO 백워드 호환을 위해서 넣어둠. 향후 삭제하는 방향으로 진행해야 함.
+			// 사실 안전하지 않음.
+			n.RunCommand = r
+			// 반드시 atomic.Value에는 *runnerSlot 형태로 저장 (panic 방지)
+			n.runnerStore(r)
+			applied++
+
+		case NodeStatusRunning, NodeStatusSucceeded, NodeStatusFailed, NodeStatusSkipped:
+			// 이미 실행 중/완료/실패/스킵된 노드는 건너뜀 (원자성 보장)
+			skipped = append(skipped, id)
+
+		default:
+			// 미래에 상태가 늘어나도 여기로 들어오면 “안전하게” 건너뜀
+			skipped = append(skipped, id)
+		}
+		n.mu.Unlock()
+	}
+	return
 }
 
 // InitDagWithOptions creates and initializes a new DAG with options.
@@ -262,11 +381,6 @@ func (dag *Dag) StartDag() (*Dag, error) {
 	safeChan := NewSafeChannelGen[runningStatus](dag.Config.MinChannelBuffer)
 	dag.StartNode.parentVertex = append(dag.StartNode.parentVertex, safeChan)
 	return dag, nil
-}
-
-// SetContainerCmd sets the container command for the DAG.
-func (dag *Dag) SetContainerCmd(r Runnable) {
-	dag.ContainerCmd = r
 }
 
 // reportError reports an error to the error channel.
@@ -419,7 +533,9 @@ func (dag *Dag) createNode(id string) *Node {
 	} else {
 		node = createNodeWithID(id)
 	}
-
+	//node.runnerStore(dag.ContainerCmd)
+	// 추가 초기 스토어: 기본 러너가 없어도 &runnerSlot{}로 non-nil 보장
+	node.runnerStore(nil)
 	node.parentDag = dag
 	dag.nodes[id] = node
 
@@ -439,10 +555,14 @@ func (dag *Dag) createNodeWithTimeOut(id string, ti time.Duration) *Node {
 
 	var node *Node
 	if dag.ContainerCmd != nil {
+		// dag.ContainerCmd 이건 모든 노드에 적용되게 하는 옵션이라서 이렇게 함.
 		node = createNode(id, dag.ContainerCmd)
 	} else {
 		node = createNodeWithID(id)
 	}
+
+	// 실행 시점 반영 기본: nil 저장
+	node.runnerStore(nil)
 
 	node.bTimeout = true
 	node.Timeout = ti
@@ -727,6 +847,7 @@ func (dag *Dag) GetReady(ctx context.Context) bool {
 		return false
 	}
 
+	// TODO 이거 생각해보자. -> 워커 풀.
 	// 워커 풀 초기화
 	maxWorkers := minInt(n, dag.Config.WorkerPoolSize)
 	dag.workerPool = NewDagWorkerPool(maxWorkers)
