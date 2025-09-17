@@ -11,6 +11,7 @@ import (
 // 추후 package
 // pipeline 이 들어오면 dag 로 바꿔줌.
 // scheduler 와 grpc 통신 해줘야 함.
+// task 를 가져올때, executor 에서 pull 하는 방식으로 해야 안정적임.
 
 // BuildDagFromPipeline ParsePipeline로 얻은 *Pipeline을 DAG로 변환
 func BuildDagFromPipeline(p *Pipeline, dagOpts ...dag_go.DagOption) (*dag_go.Dag, error) {
