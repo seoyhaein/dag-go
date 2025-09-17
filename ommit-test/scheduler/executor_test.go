@@ -40,7 +40,7 @@ func TestBuildDagFromPipeline0(t *testing.T) {
 	}
 
 	// 2) build
-	dag, err := BuildDagFromPipeline(p /*, (옵션이 있으면 여기 추가) */)
+	dag, err := BuildDagFromPipeline(p)
 	if err != nil {
 		t.Fatalf("BuildDagFromPipeline error: %v", err)
 	}
@@ -122,21 +122,6 @@ func TestBuildDagFromPipeline0(t *testing.T) {
 	// }
 }
 
-// 10초 후 성공을 리턴하는 목(mock) 러너
-type mockRunner struct{}
-
-func (mockRunner) RunE(n *dag_go.Node) error {
-	time.Sleep(10 * time.Second)
-	return nil
-}
-
-// TODO BuildDagFromPipeline 를 사용해서 SetRunner 하기 하자.
-func TestPipeline_RunWithMockSpawner(t *testing.T) {
-	p, _ := ParsePipelineFile("../pipeline.jsonc")
-	_, _ = BuildDagFromPipeline(p /*, (옵션이 있으면 여기 추가) */)
-
-}
-
 // TODO RunE 를 node 의 정보를 가져와서,
 // TODO 컨테이너를 만들어주는 api 로 재작성 하면 됨.
 // TODO 기타, 여러 부가적인 기능들을 만들어주면 될듯하다.
@@ -167,8 +152,45 @@ func (r echoFail) RunE(a interface{}) error {
 	return errors.New("mock failure")
 }
 
+// start_node -> init -> 1 -> 2 -> 5  -> 6 - fin -> end_node
+//                         -> 3       -> 6
+//                         -> 4       -> 6
+
+func TestPipeline_RunWithMockSpawner(t *testing.T) {
+	p, err := ParsePipelineFile("../pipeline.jsonc")
+	if err != nil {
+		t.Fatalf("ParsePipelineFile error: %v", err)
+	}
+
+	dag, err := BuildDagFromPipeline(p)
+	if err != nil {
+		t.Fatalf("BuildDagFromPipeline error: %v", err)
+	}
+
+	if !dag.ConnectRunner() {
+		t.Fatal("ConnectRunner failed")
+	}
+
+	dag.SetContainerCmd(echoOK{d: 100 * time.Millisecond})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// 일단 심플하게 그냥 실행.
+	if !dag.GetReady(ctx) {
+		t.Fatal("GetReady failed")
+	}
+	if !dag.Start() {
+		t.Fatal("Start failed")
+	}
+	if !dag.Wait(ctx) {
+		t.Fatal("Wait failed (expected success)")
+	}
+
+}
+
 // 전역 주입 + 특정 노드 오버라이드(모두 성공)
-func TestDAG_GlobalAndPerNodeInjection_PrintIDs_Success(t *testing.T) {
+func TestDAG_Simple(t *testing.T) {
 	dag, err := dag_go.InitDag()
 	if err != nil {
 		t.Fatalf("InitDag error: %v", err)
