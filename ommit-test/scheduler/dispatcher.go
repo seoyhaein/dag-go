@@ -43,7 +43,7 @@ type Dispatcher struct {
 	newActor func(spawnID string) *Actor
 
 	// ensure only one creator runs per spawnID under contention
-	// TODO 살펴보자. 시간이 없어서 일단 넘어감.
+	// golang.org/x/sync@v0.12.0 에서 golang.org/x/sync v0.17.0 업데이트 하고 벤더링 함.
 	sf singleflight.Group
 }
 
