@@ -1,6 +1,10 @@
 package scheduler
 
-import "sync"
+import (
+	"sync"
+
+	"golang.org/x/sync/singleflight"
+)
 
 // TODO 코드 어느정도 완성되면 주석 다 지움. 기록 보관용으로 주석은 설명 자료 참고용으로 넘김.
 // ===== Dispatcher =====
@@ -37,6 +41,10 @@ type Dispatcher struct {
 	// 기본값은 NewActor.
 	// DI for testing
 	newActor func(spawnID string) *Actor
+
+	// ensure only one creator runs per spawnID under contention
+	// TODO 살펴보자. 시간이 없어서 일단 넘어감.
+	sf singleflight.Group
 }
 
 func NewDispatcher(maxConcurrent int, reg Registry) *Dispatcher {
@@ -49,4 +57,26 @@ func NewDispatcher(maxConcurrent int, reg Registry) *Dispatcher {
 		sem:        make(chan struct{}, maxConcurrent),
 		newActor:   func(spawnID string) *Actor { return NewActor(spawnID) },
 	}
+}
+
+func (d *Dispatcher) getOrCreateActor(spawnID string) *Actor {
+	// Fast-path read from registry
+	if act, ok := d.registry.Get(spawnID); ok {
+		return act
+	}
+	// Under contention, only one goroutine performs creation per spawnID
+	v, _, _ := d.sf.Do(spawnID, func() (interface{}, error) {
+		// Double-check inside the singleflight critical section
+		if existing, ok := d.registry.Get(spawnID); ok {
+			return existing, nil
+		}
+		a := d.newActor(spawnID)
+		d.registry.Put(spawnID, a)
+		go a.loop()
+		return a, nil
+	})
+	if a, ok := v.(*Actor); ok {
+		return a
+	}
+	return nil // should not happen
 }

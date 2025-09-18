@@ -1,6 +1,12 @@
 package scheduler
 
-import "sync/atomic"
+import (
+	"context"
+	"fmt"
+	"log"
+	"sync/atomic"
+	"time"
+)
 
 // --- Actor commands ---
 
@@ -26,6 +32,64 @@ type Actor struct {
 	closing atomic.Bool
 }
 
+func NewActor(spawnID string) *Actor {
+	return &Actor{
+		spawnID: spawnID,
+		mbox:    make(chan Command, 64), // simple buffer
+	}
+}
+
+func (a *Actor) enqueue(c Command) bool {
+	if a.closing.Load() {
+		return false
+	}
+	select {
+	case a.mbox <- c:
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *Actor) loop() {
+	for c := range a.mbox {
+		switch c.Kind {
+		case CmdRun:
+			// Each Run handled sequentially (actor model)
+			a.handleRun(c)
+		case CmdCancel:
+			// TODO: implement cancel routing
+		}
+	}
+}
+
+func (a *Actor) handleRun(c Command) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	emit := func(level, state, msg string) {
+		_ = c.Sink.Emit(RunRespEvent{
+			When:    time.Now(),
+			Level:   level,
+			State:   state,
+			Msg:     msg,
+			RunID:   c.RunReq.RunID,
+			NodeID:  c.RunReq.NodeID,
+			SpawnID: c.SpawnID,
+		})
+	}
+
+	emit("INFO", "Created", "actor accepted run")
+
+	// Call driver
+	drv := &FakeDriver{}
+	if err := drv.Run(ctx, c.RunReq, func(e string) { emit("INFO", "Running", e) }); err != nil {
+		emit("ERROR", "Failed", err.Error())
+		return
+	}
+	emit("INFO", "Succeeded", "work done")
+}
+
 // ===== Event sink (simulating gRPC server stream) =====
 
 type EventSink interface {
@@ -34,13 +98,33 @@ type EventSink interface {
 
 type StdoutSink struct{}
 
-// --- Driver (fake for demo) ---
+func (StdoutSink) Emit(ev RunRespEvent) error {
+	log.Printf("[%s] %s run=%s node=%s spawn=%s msg=%s",
+		ev.Level, ev.State, ev.RunID, ev.NodeID, ev.SpawnID, ev.Msg)
+	return nil
+}
+
+// ===== Fake driver (simulates Podman/K8s driver) =====
 
 type FakeDriver struct{}
 
-func NewActor(spawnID string) *Actor {
-	return &Actor{
-		spawnID: spawnID,
-		mbox:    make(chan Command, 64), // simple buffer
+func (d *FakeDriver) Run(ctx context.Context, req RunReq, onProgress func(string)) error {
+	onProgress("resolving image digest @sha256:…")
+	time.Sleep(100 * time.Millisecond)
+	onProgress("creating pod + container")
+	time.Sleep(100 * time.Millisecond)
+	onProgress("pulling inputs to /in (RO), preparing /work, /out")
+	time.Sleep(100 * time.Millisecond)
+	onProgress("executing userscript …")
+	// Simulate work chunks
+	for i := 1; i <= 3; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+			onProgress(fmt.Sprintf("step %d/3 ok", i))
+		}
 	}
+	onProgress("uploading results to S3 (CAS)")
+	return nil
 }
