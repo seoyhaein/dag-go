@@ -1,8 +1,6 @@
 package scheduler
 
-import (
-	"time"
-)
+import "time"
 
 // ===== Message & Event types =====
 // 초기 구현, gRPC로 오갈 메시지 골격 proto-like POJOs

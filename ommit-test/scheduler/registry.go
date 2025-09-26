@@ -2,6 +2,8 @@ package scheduler
 
 import "sync"
 
+// TODO 이거 수정해야 하지 않을까?
+
 type Registry interface {
 	Get(spawnID string) (*Actor, bool)
 	Put(spawnID string, a *Actor)

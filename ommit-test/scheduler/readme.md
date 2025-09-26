@@ -2,3 +2,5 @@
 - redis 붙여야함.  
 - 컨테이너 최적화 설계 필요.  
 - RunE 모델 개발 해야함. 이거 부터 처리하자.  
+- 향후 살펴봄.
+- https://github.com/asynkron/protoactor-go 

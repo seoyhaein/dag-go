@@ -1,0 +1,170 @@
+package scheduler
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"math/rand"
+	"sync"
+
+	"golang.org/x/sync/singleflight"
+)
+
+// TODO 코드 어느정도 완성되면 주석 다 지움. 기록 보관용으로 주석은 설명 자료 참고용으로 넘김.
+// ===== Dispatcher =====
+
+// TODO slot-actor 정책인데, 이게 맞을지 심도있게 고민해야 함. 개발 방향이 바뀔 수 있어서 일단 진지하게 정말 심각하게 고민해봐야함. slot-run vs slot-actor
+
+type Dispatcher struct {
+	// registry 읽을 때는 RLock(), 새 액터 생성/등록 시 Lock()으로 보호.
+	// 다수 읽기 동시 허용, 쓰기 시 단독 진입.
+	regMu sync.RWMutex
+
+	// actor 레지스트리, spawnId -> actor, 현재 살아있는 액터들을 관리하는 테이블
+	registry Registry
+
+	// 멱등키 맵(idemToSpan) 보호용 락.
+	// regMu와 분리해 락 경합 줄임(멱등키 조회는 상대적으로 자주 일어남).
+	// 정해진 락 순서: 가능하면 idemMu → regMu 순으로 잡아 데드락 회피.
+	idemMu sync.Mutex
+
+	// IdemKey → spawnId 매핑(멱등성 구현).
+	// 동일 IdemKey로 들어오면 같은 spawnId를 반환해 중복 실행/경쟁 회피.
+	// 없으면 새 spawnId를 만들고 맵에 기록.
+	// 재연결/재시도 시 기존 실행에 재구독 같은 고급 시나리오의 기초가 됨.
+	// idemKey -> spawnId (for idempotency)
+	idemToSpan map[string]string
+
+	// 전역 동시 실행 제한 세마포어.
+	// 버퍼 크기 = 동시에 실행 허용할 “액터 수(또는 런 수)”.
+	// DispatchRun에서 시작 시 sem <- struct{}{}로 슬롯 획득, 액터가 터미널 상태 시 반납.
+	// 포화 시 정책: 지금은 에러 반환(스파이크 단계). 실제에선 대기/큐잉/우선순위/리젝트 등 선택.
+	// global concurrency gate
+	sem chan struct{}
+
+	// 액터 생성 DI(의존성 주입) 훅.
+	// 테스트에서 가짜 Actor 주입, 메트릭/옵저버블리티 훅 삽입, 다른 구현(예: PodActor/ContainerActor) 스왑 가능.
+	// 기본값은 NewActor.
+	// DI for testing
+	newActor func(spawnID string) *Actor
+
+	// ensure only one creator runs per spawnID under contention
+	// golang.org/x/sync@v0.12.0 에서 golang.org/x/sync v0.17.0 업데이트 하고 벤더링 함.
+	sf singleflight.Group
+}
+
+func NewDispatcher(maxConcurrent int, reg Registry) *Dispatcher {
+	if reg == nil {
+		reg = NewInMemoryRegistry()
+	}
+	return &Dispatcher{
+		registry:   reg,
+		idemToSpan: make(map[string]string),
+		sem:        make(chan struct{}, maxConcurrent),
+		newActor:   func(spawnID string) *Actor { return NewActor(spawnID) },
+	}
+}
+
+// NewDispatcherWithMemory Convenience ctor
+func NewDispatcherWithMemory(maxConcurrent int) *Dispatcher {
+	return NewDispatcher(maxConcurrent, NewInMemoryRegistry())
+}
+
+// getOrCreateActor TODO 일반 살펴보자.
+// TODO 해제하는것도 만들어 줘야 함.
+func (d *Dispatcher) getOrCreateActor(spawnID string) (*Actor, error) {
+	// Fast-path: already exists
+	if act, ok := d.registry.Get(spawnID); ok {
+		return act, nil
+	}
+
+	// Ensure only one creator runs per spawnID (singleflight v0.17.0: v, err, shared)
+	// 동일 키에 대한 동시성 문제 발생시 해결
+	v, err, _ := d.sf.Do(spawnID, func() (interface{}, error) {
+		// Double-check inside critical section
+		if existing, ok := d.registry.Get(spawnID); ok {
+			return existing, nil
+		}
+		// 세마포어
+		// slot=actor: acquire a slot BEFORE creating the actor
+		select {
+		case d.sem <- struct{}{}:
+		// acquired; proceed
+		default:
+			return nil, errors.New("dispatcher saturated: max concurrent actors (by actor) reached")
+		}
+
+		a := d.newActor(spawnID)
+		if a == nil {
+			// defensive: creation failed → release the slot we just took
+			<-d.sem
+			return nil, errors.New("newActor returned nil")
+		}
+
+		d.registry.Put(spawnID, a)
+		go a.loop()
+		return a, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("getOrCreateActor(%s) failed: %w", spawnID, err)
+	}
+
+	act, ok := v.(*Actor)
+	if !ok {
+		return nil, errors.New("unexpected type from singleflight")
+	}
+	return act, nil
+}
+
+// DispatchRun emulates the gRPC RunE handler body.
+func (d *Dispatcher) DispatchRun(ctx context.Context, req *RunReq, sink EventSink) error {
+	if req == nil || req.IdemKey == "" {
+		return errors.New("invalid request: nil or missing IdemKey")
+	}
+	spawnID := d.resolveSpawnID(req.IdemKey)
+	act, _ := d.getOrCreateActor(spawnID)
+	cmd := Command{
+		Kind:    CmdRun,
+		RunReq:  *req,
+		SpawnID: spawnID,
+		Sink:    sink,
+	}
+	// Acquire concurrency slot for *start*; the actor will release when terminal.
+	select {
+	case d.sem <- struct{}{}:
+		// proceed
+	default:
+		// Backpressure: optionally block; here we return an error for the spike.
+		return errors.New("dispatcher saturated: max concurrent actors reached")
+	}
+	ok := act.enqueue(cmd)
+	if !ok {
+		<-d.sem // release slot if we failed to enqueue
+		return errors.New("mailbox full: command dropped")
+	}
+	return nil
+}
+
+// onActorTerminal is called by Actor to notify Dispatcher to release slot.
+func (d *Dispatcher) onActorTerminal(spawnID string) {
+	select {
+	case <-d.sem:
+		// released
+	default:
+		// should not happen; log and continue
+		log.Printf("WARN: semaphore release mismatch for %s", spawnID)
+	}
+}
+
+// Resolve spawnId from IdemKey; create if not exists.
+func (d *Dispatcher) resolveSpawnID(idemKey string) string {
+	d.idemMu.Lock()
+	defer d.idemMu.Unlock()
+	if s, ok := d.idemToSpan[idemKey]; ok {
+		return s
+	}
+	spawnID := fmt.Sprintf("sp_%08x", rand.Uint32())
+	d.idemToSpan[idemKey] = spawnID
+	return spawnID
+}
