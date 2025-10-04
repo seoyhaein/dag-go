@@ -1165,7 +1165,7 @@ func copyDag(original *Dag) (map[string]*Node, []*Edge) {
 	for _, n := range original.nodes {
 		// 필요한 최소한의 정보만 복사
 		newNode := &Node{
-			ID: n.ID, // ✅ Node 구조체가 Id로 되어 있다면 그대로 유지
+			ID: n.ID, // Node 구조체가 Id로 되어 있다면 그대로 유지
 			// 기타 필드는 cycle 검증에 필요하지 않으므로 생략
 		}
 		newNodes[newNode.ID] = newNode
@@ -1192,8 +1192,8 @@ func copyDag(original *Dag) (map[string]*Node, []*Edge) {
 	newEdges := make([]*Edge, len(original.Edges))
 	for i, e := range original.Edges {
 		newEdges[i] = &Edge{
-			parentID: e.parentID, // ✅ 수정됨
-			childID:  e.childID,  // ✅ 수정됨
+			parentID: e.parentID,
+			childID:  e.childID,
 			// vertex 등 기타 정보는 cycle 검증에 필요하지 않으므로 생략
 		}
 	}
