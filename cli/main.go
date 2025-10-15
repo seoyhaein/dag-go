@@ -45,9 +45,14 @@ func RunHeavyDag() {
 		panic(fmt.Sprintf("InitDag failed: %v", err))
 	}
 
-	dag.SetContainerCmd(&HeavyCommand{
+	/*	dag.SetContainerCmd(&HeavyCommand{
 		Iterations: 10_000_000,             // 꽤 많은 연산
 		Sleep:      200 * time.Millisecond, // 네트워크/디스크 지연 시뮬레이션
+	})*/
+
+	dag.SetContainerCmd(&HeavyCommand{
+		Iterations: 10,                   // 꽤 많은 연산
+		Sleep:      2 * time.Millisecond, // 네트워크/디스크 지연 시뮬레이션
 	})
 
 	// 노드 구성 동일

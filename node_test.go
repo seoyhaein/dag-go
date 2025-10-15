@@ -2,10 +2,11 @@ package dag_go
 
 import (
 	"context"
-	"go.uber.org/goleak"
 	"math/rand"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 )
 
 // TestPreFlight_AllSucceed tests preFlight when all parent channels send Succeed.

@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go.uber.org/goleak"
 	"math/rand"
 	"strings"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 )
 
 func TestInitDag(t *testing.T) {
@@ -591,6 +592,10 @@ func TestDetectCycle(t *testing.T) {
 	}
 }
 
+type NoopCmd struct{}
+
+func (NoopCmd) RunE(_ interface{}) error { return nil }
+
 func TestSimpleDag(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	dag, _ := InitDag()
@@ -618,6 +623,10 @@ func TestSimpleDag(t *testing.T) {
 	if err := dag.FinishDag(); err != nil {
 		t.Fatalf("FinishDag failed: %v", err)
 	}
+
+	// 추가 오류 해결을 위해 NoopCmd 사용
+	// 해당 코드가 없으면 wait 에서 false 리턴한다. 오류난다.
+	dag.SetContainerCmd(NoopCmd{})
 
 	ctx := context.Background()
 	dag.ConnectRunner()

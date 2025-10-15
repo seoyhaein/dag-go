@@ -17,9 +17,11 @@
 - 컨테이너 베이스 설계
 - scheculer 에서 받은 데이터를 통해서 executor 에서 정보를 빼오고 이것을 dag 형태로 구동시키는 것.
 - k8s 에서 내부 pod 에서 작동함.
+- 보다 구체화 하자. 
 
 ### spawner
 - 컨테이너 베이스 설계
 - executor 와 통신으로 pod 및 컨테이너 생성, cloud 연결, k8s 에서 client-go 로 pod 또는 job 을 생성
+- 분리하고, 작성된것을 기반으로 해서 k8s 에서 job 또는 pod 생성하는 것 진행.  
 - 
   https://chatgpt.com/share/68b92cb0-51b4-800d-81ac-d37c0714fef6
