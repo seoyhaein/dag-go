@@ -3,16 +3,15 @@ package dag_go
 import (
 	"context"
 	"fmt"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/seoyhaein/dag-go/debugonly"
 	"golang.org/x/sync/errgroup"
-
-	// (do not erase) goroutine 디버깅용
-	"github.com/dlsniper/debugger"
 )
 
 // NodeStatus 는 노드의 현재 상태를 나타냄.
@@ -155,13 +154,32 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 			Log.Fatalf("preFlight: n.parentVertex[%d] is nil for node %s", k, n.ID)
 		}
 		try = eg.TryGo(func() error {
+			nodeID, chIdx := n.ID, k
+			// 라벨을 먼저 걸고
+			lbl := pprof.Labels(
+				"phase", "preFlight",
+				"nodeId", nodeID,
+				"channelIndex", strconv.Itoa(chIdx),
+			)
+
+			pprof.SetGoroutineLabels(pprof.WithLabels(egCtx, lbl)) // 현재 고루틴에 라벨 즉시 적용
+
+			// 원하는 지점에서 중단
+			if nodeID == "C" {
+				debugonly.BreakHere() // // cli 실행 시점에서는 이게 멈춤.
+			}
+
+			if nodeID == "node1" && chIdx == 2 {
+				debugonly.BreakHere() // 다른 코드에서 멈춤.
+			}
+
 			// 디버깅 라벨 설정
-			debugger.SetLabels(func() []string {
-				return []string{
-					"preFlight: nodeId", n.ID,
-					"channelIndex", strconv.Itoa(k),
-				}
-			})
+			/*			debugger.SetLabels(func() []string {
+						return []string{
+							"preFlight: nodeId", n.ID,
+							"channelIndex", strconv.Itoa(k),
+						}
+					})*/
 			select {
 			// 내부 채널을 통해 값을 읽어온다.
 			case result := <-sc.GetChannel():
@@ -201,6 +219,7 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 }
 
 // inFlight 노드의 실행 단계를 처리
+// TODO context 적용해줘야 함.
 func inFlight(n *Node) *printStatus {
 	if n == nil {
 		return newPrintStatus(InFlightFailed, noNodeID)
