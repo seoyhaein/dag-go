@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 )
 
 type (
@@ -13,39 +15,49 @@ type (
 	echoFail struct{ d time.Duration }
 )
 
-func (r echoFail) RunE(a interface{}) error {
+func (r echoFail) RunE(ctx context.Context, a interface{}) error {
 	id := "<unknown>"
 	if n, ok := a.(*Node); ok && n != nil {
 		id = n.ID
 	}
 	fmt.Printf("[RunE FAIL] node=%s sleep=%s\n", id, r.d)
-	time.Sleep(r.d)
-	return errors.New("mock failure")
+	select {
+	case <-time.After(r.d):
+		return errors.New("mock failure")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
-func (r echoOK) RunE(a interface{}) error {
+func (r echoOK) RunE(ctx context.Context, a interface{}) error {
 	id := "<unknown>"
 	if n, ok := a.(*Node); ok && n != nil {
 		id = n.ID
 	}
 	fmt.Printf("[RunE OK] node=%s sleep=%s\n", id, r.d)
-	time.Sleep(r.d)
-	return nil
+	select {
+	case <-time.After(r.d):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func Test_lateBinding(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	dag, _ := InitDag()
 
-	// 기본 러너: 전역 성공 목
+	// Global default runner: succeed after 100 ms.
 	dag.SetContainerCmd(echoOK{d: 100 * time.Millisecond})
 
-	// 노드 생성 및 엣지 구성
+	// Build node graph: start -> A -> B.
 	a := dag.CreateNode("A")
 	b := dag.CreateNode("B")
 	_ = dag.AddEdge(StartNode, a.ID)
 	_ = dag.AddEdge(a.ID, b.ID)
 
-	// Resolver 등록: 특정 이미지/ID 규칙으로 동적 러너 선택 가능
+	// Resolver: node "B" uses a longer delay runner by default.
 	dag.SetRunnerResolver(func(n *Node) Runnable {
 		if n.ID == "B" {
 			return echoOK{d: 300 * time.Millisecond}
@@ -53,14 +65,15 @@ func Test_lateBinding(t *testing.T) {
 		return nil
 	})
 
-	// 실행 준비
 	_ = dag.FinishDag()
 	_ = dag.ConnectRunner()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = dag.GetReady(ctx)
 
-	// (3) 상태 기반 허용: 아직 a가 실행 중이라면 b 러너를 바꿔도 반영됨
+	// Override node "B" with a failing runner after GetReady but before Start.
+	// Because node "B" is still Pending, SetNodeRunner should accept the change.
 	dag.SetNodeRunner("B", echoFail{d: 150 * time.Millisecond})
 
 	_ = dag.Start()

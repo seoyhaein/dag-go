@@ -5,42 +5,42 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/seoyhaein/dag-go"
+	dag_go "github.com/seoyhaein/dag-go"
 	"github.com/seoyhaein/dag-go/debugonly"
 )
 
 // TODO 이건 별도로 테스트 서버에서 해야함. 내 개발 노트북에서 하면 뻗음.
 
+// HeavyCommand simulates a CPU-and-IO-intensive workload for DAG load testing.
 type HeavyCommand struct {
 	Iterations int           // 반복 연산 횟수
 	Sleep      time.Duration // 부하 시뮬레이션용 sleep 시간
 }
 
-// RunE TODO node 수정해줘야 함.
-func (c *HeavyCommand) RunE(_ interface{}) error {
-
-	// CPU 부하 시뮬레이션
+// RunE executes a CPU-bound loop followed by a context-aware sleep to simulate
+// network / disk I/O latency.  Cancellation via ctx is respected during sleep.
+func (c *HeavyCommand) RunE(ctx context.Context, _ interface{}) error {
+	// CPU load simulation.
 	sum := 0
 	for i := 0; i < c.Iterations; i++ { //nolint:intrange
 		sum += i*i + i%3
 	}
-	// Go 1.22  부터 새로운 lint 경고가 나와서 이렇게 고치면 경고가 없어짐.
-	// for i := range c.Iterations {
-	//	sum += i*i + i%3
-	// }
-	// 하지만 나는 위의 방식으로 사용할 예정임. 나머지 코드에서도 그대로 유지
-	_ = sum // 쓰이지 않지만 최적화 방지
+	_ = sum // prevent compiler optimisation
 
-	// 네트워크/디스크 I/O 지연 시뮬레이션
-	time.Sleep(c.Sleep)
-
-	return nil
+	// I/O latency simulation — honour context cancellation.
+	select {
+	case <-time.After(c.Sleep):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func main() {
 	RunHeavyDag()
 }
 
+// RunHeavyDag constructs and executes a multi-node DAG with HeavyCommand runners for load testing.
 func RunHeavyDag() {
 	dag, err := dag_go.InitDag()
 	if err != nil {

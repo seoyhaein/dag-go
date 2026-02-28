@@ -1,0 +1,185 @@
+version: "2"
+
+# ------------------------------------------------------------------------------
+# Run options
+# ------------------------------------------------------------------------------
+run:
+  allow-parallel-runners: true
+
+# ------------------------------------------------------------------------------
+# Linters
+# ------------------------------------------------------------------------------
+linters:
+  default: none
+
+  enable:
+    # Go 1.22+에서 for-range 변수 캡처 문제를 잡아준다.
+    # dag-go의 goroutine 클로저 캡처 버그를 방지하는 데 핵심적이다.
+    - copyloopvar
+
+    # 중복 코드 감지
+    - dupl
+
+    # import 규칙(라이브러리 순수성 경계) 강제
+    - depguard
+
+    # 에러 반환값 체크 누락 검출
+    - errcheck
+
+    # 상수로 뺄 수 있는 값 검출 (magic number 방지)
+    - goconst
+
+    # cyclomatic complexity(분기 복잡도) 제한
+    # Flight 함수(preFlight/inFlight/postFlight) 비대화를 방지한다.
+    - gocyclo
+
+    # cognitive complexity(인지 복잡도) 제한
+    # connectRunner, merge 등의 함수 승격을 유도한다.
+    - gocognit
+
+    # go vet(정적 분석): copylock으로 atomic.Value 포함 Node 값 복사 감지
+    - govet
+
+    # 할당했지만 사용하지 않는 값 등
+    - ineffassign
+
+    # 라인 길이 제한
+    - lll
+
+    # 오타 교정
+    - misspell
+
+    # naked return(가독성 저하) 검출
+    - nakedret
+
+    # slice 미리 할당 권장
+    - prealloc
+
+    # 스타일/규칙 기반 린터
+    - revive
+
+    # staticcheck(강력한 정적 분석)
+    - staticcheck
+
+    # 불필요한 형변환 검출
+    - unconvert
+
+    # 사용되지 않는 파라미터 검출
+    - unparam
+
+    # 사용되지 않는 변수/함수 등
+    - unused
+
+  settings:
+    # --------------------------------------------------------------------------
+    # depguard: dag-go 라이브러리 순수성 경계 강제
+    # K8s 의존성이 이 순수 Go 라이브러리에 유입되는 것을 CI에서 차단한다.
+    # --------------------------------------------------------------------------
+    depguard:
+      rules:
+        library_purity:
+          # 전체 패키지에 적용 (단일 패키지 구조)
+          files:
+            - "**/*.go"
+
+          # 허용 목록: Go 표준 라이브러리 + 승인된 외부 패키지만 허용
+          allow:
+            - "$gostd"
+            - "github.com/google/uuid"
+            - "github.com/seoyhaein/utils"
+            - "github.com/sirupsen/logrus"
+            - "go.uber.org/goleak"
+            - "golang.org/x/sync"
+            - "github.com/dlsniper/debugger"
+            - "github.com/seoyhaein/dag-go"
+
+          # 금지 목록: K8s 의존성은 순수 Go 라이브러리에서 절대 허용하지 않는다.
+          deny:
+            - pkg: "k8s.io/**"
+              desc: "dag-go는 순수 Go 라이브러리다. Kubernetes 의존성은 허용되지 않는다."
+            - pkg: "sigs.k8s.io/**"
+              desc: "controller-runtime 의존성은 이 라이브러리에서 금지된다."
+
+    # --------------------------------------------------------------------------
+    # govet: copylocks analyser — detects value-copy of types that contain
+    # sync primitives (e.g. atomic.Value inside Node).
+    # --------------------------------------------------------------------------
+    govet:
+      enable:
+        - copylocks
+        - shadow
+
+    # --------------------------------------------------------------------------
+    # gocyclo: cyclomatic complexity 제한
+    # --------------------------------------------------------------------------
+    gocyclo:
+      min-complexity: 15
+
+    # --------------------------------------------------------------------------
+    # gocognit: cognitive complexity 제한
+    # Flight 함수나 핵심 DAG 메서드가 비대해지면 L2 승격을 유도한다.
+    # --------------------------------------------------------------------------
+    gocognit:
+      min-complexity: 15
+
+    # --------------------------------------------------------------------------
+    # lll: 라인 길이 제한
+    # --------------------------------------------------------------------------
+    lll:
+      line-length: 140
+
+    # --------------------------------------------------------------------------
+    # revive: 스타일/품질 검사
+    # --------------------------------------------------------------------------
+    revive:
+      rules:
+        - name: comment-spacings
+        - name: import-shadowing
+        # Exported API 주석 강제 (L4 Public API Godoc 규칙)
+        - name: exported
+          arguments:
+            - "checkPrivateReceivers"
+
+  # ----------------------------------------------------------------------------
+  # Exclusions
+  # ----------------------------------------------------------------------------
+  exclusions:
+    generated: lax
+
+    rules:
+      # 벤치마크/테스트 파일은 중복(dupl)과 라인 길이(lll) 예외
+      - linters:
+          - dupl
+          - lll
+        path: ".*_test\\.go"
+
+      # 테스트 파일은 depguard에서 제외 (테스트 보조 라이브러리 허용)
+      - linters:
+          - depguard
+        path: ".*_test\\.go"
+
+      # //nolint:unused 처리된 미래 사용 예정 함수는 unparam 제외
+      - linters:
+          - unparam
+        text: "is always"
+        path: ".*_test\\.go"
+
+    paths:
+      - third_party$
+      - builtin$
+      - ^examples
+
+# ------------------------------------------------------------------------------
+# Formatters
+# ------------------------------------------------------------------------------
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - ^examples

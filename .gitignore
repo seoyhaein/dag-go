@@ -26,5 +26,11 @@ go.work
 *.yml
 *.yaml
 
+# CI/CD 및 린트 설정 파일은 추적
+!.golangci.yml
+!.github/**/*.yml
+!.github/**/*.yaml
+
 .idea/
 vendor/
+bin/

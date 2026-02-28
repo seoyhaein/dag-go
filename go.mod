@@ -5,7 +5,6 @@ go 1.24.0
 toolchain go1.24.7
 
 require (
-	github.com/dlsniper/debugger v0.6.0
 	github.com/google/uuid v1.3.0
 	github.com/seoyhaein/utils v0.0.6
 	github.com/sirupsen/logrus v1.9.0

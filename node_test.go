@@ -3,6 +3,8 @@ package dag_go
 import (
 	"context"
 	"math/rand"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -148,6 +150,194 @@ func TestPreFlight_AllSucceed_WithManyChannels(t *testing.T) {
 	}
 	if !node.IsSucceed() {
 		t.Error("Expected node.succeed to be true")
+	}
+}
+
+// ── TransitionStatus unit tests ──────────────────────────────────────────────
+
+// TestTransitionStatus_ValidTransitions verifies that every permitted edge in
+// the NodeStatus state machine is accepted by TransitionStatus.
+func TestTransitionStatus_ValidTransitions(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	cases := []struct {
+		name string
+		from NodeStatus
+		to   NodeStatus
+	}{
+		{"Pending→Running", NodeStatusPending, NodeStatusRunning},
+		{"Pending→Skipped", NodeStatusPending, NodeStatusSkipped},
+		{"Running→Succeeded", NodeStatusRunning, NodeStatusSucceeded},
+		{"Running→Failed", NodeStatusRunning, NodeStatusFailed},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n := createNodeWithID("v-" + tc.name)
+			// Force the node into the `from` state before testing the transition.
+			n.SetStatus(tc.from)
+			if !n.TransitionStatus(tc.from, tc.to) {
+				t.Errorf("expected TransitionStatus(%v→%v) to return true, got false", tc.from, tc.to)
+			}
+			if got := n.GetStatus(); got != tc.to {
+				t.Errorf("expected status %v after transition, got %v", tc.to, got)
+			}
+		})
+	}
+}
+
+// TestTransitionStatus_InvalidTransitions verifies that illegal state-machine
+// edges are always rejected, preventing backwards or terminal-state overwrites.
+func TestTransitionStatus_InvalidTransitions(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	cases := []struct {
+		name    string
+		initial NodeStatus
+		from    NodeStatus
+		to      NodeStatus
+	}{
+		// Wrong pre-condition (from ≠ current).
+		{"Pending:RunningAsFrom", NodeStatusPending, NodeStatusRunning, NodeStatusSucceeded},
+		// Backwards transition.
+		{"Running→Pending", NodeStatusRunning, NodeStatusRunning, NodeStatusPending},
+		// Terminal → any.
+		{"Failed→Succeeded", NodeStatusFailed, NodeStatusFailed, NodeStatusSucceeded},
+		{"Succeeded→Running", NodeStatusSucceeded, NodeStatusSucceeded, NodeStatusRunning},
+		{"Skipped→Running", NodeStatusSkipped, NodeStatusSkipped, NodeStatusRunning},
+		// Already skipped, attempt duplicate Pending→Skipped.
+		{"Skipped→Skipped", NodeStatusSkipped, NodeStatusPending, NodeStatusSkipped},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n := createNodeWithID("inv-" + tc.name)
+			n.SetStatus(tc.initial)
+			if n.TransitionStatus(tc.from, tc.to) {
+				t.Errorf("expected TransitionStatus(%v→%v) to return false (initial=%v), got true",
+					tc.from, tc.to, tc.initial)
+			}
+			// Status must remain unchanged.
+			if got := n.GetStatus(); got != tc.initial {
+				t.Errorf("expected status %v to be unchanged, got %v", tc.initial, got)
+			}
+		})
+	}
+}
+
+// TestTransitionStatus_ConcurrentPendingToRunning launches many goroutines that
+// all race to perform the Pending→Running transition on a single node.
+// Exactly one must win; all others must be rejected.  Run with -race to verify
+// there are no data races on the status field.
+func TestTransitionStatus_ConcurrentPendingToRunning(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	const numGoroutines = 200
+	n := createNodeWithID("cas-race")
+
+	var (
+		wg   sync.WaitGroup
+		wins int32
+	)
+
+	wg.Add(numGoroutines)
+	for i := 0; i < numGoroutines; i++ { //nolint:intrange
+		go func() {
+			defer wg.Done()
+			if n.TransitionStatus(NodeStatusPending, NodeStatusRunning) {
+				atomic.AddInt32(&wins, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&wins); got != 1 {
+		t.Errorf("expected exactly 1 Pending→Running winner, got %d", got)
+	}
+	if n.GetStatus() != NodeStatusRunning {
+		t.Errorf("expected node status Running after CAS race, got %v", n.GetStatus())
+	}
+}
+
+// TestTransitionStatus_ConcurrentFullLifecycle runs a complete Pending→Running→
+// {Succeeded|Failed} lifecycle under concurrent pressure from goroutines that
+// attempt duplicate or illegal transitions at each phase.
+//
+//nolint:gocognit // multi-phase concurrent test; complexity comes from coordinating three distinct race phases
+func TestTransitionStatus_ConcurrentFullLifecycle(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	const attackers = 100
+	n := createNodeWithID("lifecycle-race")
+
+	// Phase 1: race Pending → Running.
+	var wg sync.WaitGroup
+	var phase1Wins int32
+	wg.Add(attackers)
+	for i := 0; i < attackers; i++ { //nolint:intrange
+		go func() {
+			defer wg.Done()
+			if n.TransitionStatus(NodeStatusPending, NodeStatusRunning) {
+				atomic.AddInt32(&phase1Wins, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if atomic.LoadInt32(&phase1Wins) != 1 {
+		t.Fatalf("phase1: expected 1 Pending→Running winner, got %d", phase1Wins)
+	}
+
+	// Phase 2: race Running → Succeeded (half goroutines) vs Running → Failed (other half).
+	var (
+		succeedWins int32
+		failedWins  int32
+	)
+	wg.Add(attackers)
+	for i := 0; i < attackers; i++ { //nolint:intrange
+		go func(idx int) {
+			defer wg.Done()
+			if idx%2 == 0 {
+				if n.TransitionStatus(NodeStatusRunning, NodeStatusSucceeded) {
+					atomic.AddInt32(&succeedWins, 1)
+				}
+			} else {
+				if n.TransitionStatus(NodeStatusRunning, NodeStatusFailed) {
+					atomic.AddInt32(&failedWins, 1)
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	totalPhase2 := atomic.LoadInt32(&succeedWins) + atomic.LoadInt32(&failedWins)
+	if totalPhase2 != 1 {
+		t.Errorf("phase2: expected exactly 1 terminal transition, got %d (succeed=%d, failed=%d)",
+			totalPhase2, atomic.LoadInt32(&succeedWins), atomic.LoadInt32(&failedWins))
+	}
+
+	// Phase 3: terminal state must reject all further transitions.
+	final := n.GetStatus()
+	if final != NodeStatusSucceeded && final != NodeStatusFailed {
+		t.Errorf("expected terminal status, got %v", final)
+	}
+
+	var phase3Wins int32
+	wg.Add(attackers)
+	for i := 0; i < attackers; i++ { //nolint:intrange
+		go func() {
+			defer wg.Done()
+			// Both of these must be rejected because final is a terminal state.
+			if n.TransitionStatus(NodeStatusSucceeded, NodeStatusRunning) ||
+				n.TransitionStatus(NodeStatusFailed, NodeStatusRunning) {
+				atomic.AddInt32(&phase3Wins, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&phase3Wins); got != 0 {
+		t.Errorf("phase3: expected 0 transitions from terminal state, got %d", got)
 	}
 }
 

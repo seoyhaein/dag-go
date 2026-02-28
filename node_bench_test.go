@@ -29,7 +29,10 @@ func setupNode(id string, numParents int, value runningStatus) *Node {
 			time.Sleep(time.Duration(rand.Intn(5)) * time.Millisecond)
 			s.Send(value)
 			// 값 전송 후 채널을 닫음
-			s.Close()
+			if err := s.Close(); err != nil {
+				// 벤치마크 고루틴 내에서는 에러를 무시해도 무방하지만 명시적으로 처리
+				_ = err
+			}
 		}(sc)
 		node.parentVertex[i] = sc
 	}

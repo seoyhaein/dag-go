@@ -1,0 +1,23 @@
+name: Benchmarks
+
+on:
+  # 벤치마크는 수동으로만 실행한다.
+  # 성능 측정은 노이즈가 많아 push/PR 마다 자동 실행하지 않는다.
+  workflow_dispatch:
+
+jobs:
+  bench:
+    name: Run on Ubuntu
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run Benchmarks
+        run: |
+          go test -bench=. -benchmem -benchtime=3s -run=^$ ./...

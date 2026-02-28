@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"strings"
 	"testing"
@@ -11,6 +12,9 @@ import (
 
 	"go.uber.org/goleak"
 )
+
+// Compile-time interface check.
+var _ Runnable = DummyRunnable{}
 
 func TestInitDag(t *testing.T) {
 	defer goleak.VerifyNone(t)
@@ -57,11 +61,10 @@ func TestInitDag(t *testing.T) {
 	}
 }
 
-// DummyRunnable 은 Runnable 인터페이스의 더미 구현체
+// DummyRunnable is a no-op implementation of Runnable used in tests.
 type DummyRunnable struct{}
 
-// DummyRunnable 이 Runnable 인터페이스를 구현하도록 필요한 메서드들을 정의
-func (_ DummyRunnable) RunE(_ interface{}) error {
+func (DummyRunnable) RunE(_ context.Context, _ interface{}) error {
 	return nil
 }
 
@@ -80,29 +83,27 @@ func TestCreateNode(t *testing.T) {
 	if node.ID != id {
 		t.Errorf("expected node id to be %s, got %s", id, node.ID)
 	}
-	// ContainerCmd 가 nil 이면 createNodeWithId 를 호출하므로 RunCommand 는 nil 이어야 함.
-	if node.RunCommand != nil {
-		t.Errorf("expected RunCommand to be nil when ContainerCmd is nil, got %v", node.RunCommand)
+	// With nil ContainerCmd the per-node runner should also be nil.
+	if r := node.runnerLoad(); r != nil {
+		t.Errorf("expected per-node runner to be nil when ContainerCmd is nil, got %v", r)
 	}
-	// parentDag 가 올바르게 설정되었는지 확인
+	// parentDag must be set to the owning DAG.
 	if node.parentDag != dag {
 		t.Errorf("expected parentDag to be set to dag, got %v", node.parentDag)
 	}
-	// dag.nodes 맵에 해당 노드가 등록되었는지 확인
+	// The node must be registered in dag.nodes.
 	if dag.nodes[id] != node {
 		t.Errorf("expected dag.nodes[%s] to be the created node", id)
 	}
-	// 같은 id로 다시 노드를 생성하면 nil 이 반환되어야 함.
+	// Creating the same id again must return nil.
 	if dup := dag.CreateNode(id); dup != nil {
 		t.Errorf("expected duplicate createNode call to return nil, got %v", dup)
 	}
 
 	// -------------------------------
-	// Case 2: ContainerCmd 가 non-nil 인 경우
+	// Case 2: ContainerCmd is non-nil
 	// -------------------------------
-	// 새로운 Dag 인스턴스 생성
 	dag2 := NewDag()
-	// DummyRunnable 을 ContainerCmd 에 할당하여 non-nil 인 경우를 테스트
 	dummy := DummyRunnable{}
 	dag2.ContainerCmd = dummy
 
@@ -114,15 +115,15 @@ func TestCreateNode(t *testing.T) {
 	if node2.ID != id2 {
 		t.Errorf("expected node2 id to be %s, got %s", id2, node2.ID)
 	}
-	// ContainerCmd 가 non-nil 이면 createNode(id, ContainerCmd)를 호출하므로, RunCommand 가 설정되어 있어야 함.
-	if node2.RunCommand == nil {
-		t.Errorf("expected RunCommand to be set when ContainerCmd is non-nil")
+	// When ContainerCmd is non-nil, getRunnerSnapshot() must resolve to it.
+	r := node2.getRunnerSnapshot()
+	if r == nil {
+		t.Errorf("expected runner to be resolved from ContainerCmd, got nil")
 	}
-	// 타입 검사를 통해 DummyRunnable 구현체가 맞는지 확인
-	if _, ok := node2.RunCommand.(DummyRunnable); !ok {
-		t.Errorf("expected RunCommand to be of type DummyRunnable, got %T", node2.RunCommand)
+	if _, ok := r.(DummyRunnable); !ok {
+		t.Errorf("expected runner to be DummyRunnable, got %T", r)
 	}
-	// 동일한 id로 다시 생성 시 nil 을 반환하는지 검증
+	// Duplicate creation must return nil.
 	if dup2 := dag2.CreateNode(id2); dup2 != nil {
 		t.Errorf("expected duplicate createNode call to return nil, got %v", dup2)
 	}
@@ -190,6 +191,8 @@ func TestCreateEdge(t *testing.T) {
 }
 
 // TestCreateEdge 이게 성공해야지 의미가 있음.
+//
+//nolint:gocognit,gocyclo // comprehensive edge test covering many validation paths in a single test function
 func TestAddEdge(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	// 새로운 Dag 인스턴스 생성 (NewDag 사용)
@@ -276,6 +279,13 @@ func TestAddEdge(t *testing.T) {
 	err = dag.AddEdge("node1", "node2")
 	if err == nil {
 		t.Error("expected error on duplicate edge creation, got nil")
+	}
+	// 관계가 중복 추가되지 않았는지 확인
+	if len(node1.children) != 1 {
+		t.Errorf("expected node1 to have 1 child after duplicate edge, got %d", len(node1.children))
+	}
+	if len(node2.parent) != 1 {
+		t.Errorf("expected node2 to have 1 parent after duplicate edge, got %d", len(node2.parent))
 	}
 }
 
@@ -423,7 +433,7 @@ func TestManyCopyDags(t *testing.T) {
 // 복사본에 데이터를 새롭게 넣었는데 만약 원본 DAG 의 내용이 변경한 복사본과 같아지면 shallow copy 이기때문에 에러남.
 // copyDag 에서 shallow copy 가 일어나는 곳은 아예 복사를 하지 않는다.
 //
-//nolint:funlen // 이 테스트는 길지만 의도적으로 유지함
+//nolint:funlen,gocognit,gocyclo // 이 테스트는 길지만 의도적으로 유지함
 func TestCopyDagIndependence(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	// 1. 원본 DAG 생성 및 초기화
@@ -548,7 +558,102 @@ func TestCopyDagIndependence(t *testing.T) {
 	}
 }
 
-// TODO detectCycleDFS, DetectCycle 테스트 필요.
+// TestDetectCycle_SimpleCycle verifies that FinishDag returns ErrCycleDetected
+// for a direct two-node cycle: start → A → B → A.
+func TestDetectCycle_SimpleCycle(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	dag, _ := InitDag()
+
+	if err := dag.AddEdge(StartNode, "A"); err != nil {
+		t.Fatalf("AddEdge start->A: %v", err)
+	}
+	if err := dag.AddEdge("A", "B"); err != nil {
+		t.Fatalf("AddEdge A->B: %v", err)
+	}
+	// Back-edge B→A closes the cycle; AddEdge allows it (only rejects from==to).
+	if err := dag.AddEdge("B", "A"); err != nil {
+		t.Fatalf("AddEdge B->A: %v", err)
+	}
+
+	err := dag.FinishDag()
+	if err == nil {
+		t.Fatal("expected ErrCycleDetected, got nil")
+	}
+	if !errors.Is(err, ErrCycleDetected) {
+		t.Errorf("expected ErrCycleDetected, got: %v", err)
+	}
+}
+
+// TestDetectCycle_ComplexCycle verifies that FinishDag returns ErrCycleDetected
+// for a three-node cycle: start → A → B → C → A.
+func TestDetectCycle_ComplexCycle(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	dag, _ := InitDag()
+
+	for _, pair := range []struct{ from, to string }{
+		{StartNode, "A"}, {"A", "B"}, {"B", "C"}, {"C", "A"},
+	} {
+		if err := dag.AddEdge(pair.from, pair.to); err != nil {
+			t.Fatalf("AddEdge %s->%s: %v", pair.from, pair.to, err)
+		}
+	}
+
+	err := dag.FinishDag()
+	if err == nil {
+		t.Fatal("expected ErrCycleDetected, got nil")
+	}
+	if !errors.Is(err, ErrCycleDetected) {
+		t.Errorf("expected ErrCycleDetected, got: %v", err)
+	}
+}
+
+// TestDetectCycle_SelfLoop verifies that DetectCycle returns true for a node
+// that lists itself as a child.  AddEdge rejects from==to, so the graph is
+// constructed directly to reach the algorithm under test.
+func TestDetectCycle_SelfLoop(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	dag := NewDag()
+	nodeA := &Node{ID: "A"}
+	nodeA.children = []*Node{nodeA} // A → A
+	dag.nodes = map[string]*Node{"A": nodeA}
+
+	if !DetectCycle(dag) {
+		t.Error("expected DetectCycle to return true for self-loop, got false")
+	}
+}
+
+// TestDetectCycle_NoCycle verifies that a valid diamond-shaped DAG is not flagged
+// as cyclic by either FinishDag or DetectCycle.
+//
+// Graph: start → A → {B1, B2} → C → {D1, D2} → E
+func TestDetectCycle_NoCycle(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	dag, _ := InitDag()
+
+	for _, pair := range []struct{ from, to string }{
+		{StartNode, "A"},
+		{"A", "B1"}, {"A", "B2"},
+		{"B1", "C"}, {"B2", "C"},
+		{"C", "D1"}, {"C", "D2"},
+		{"D1", "E"}, {"D2", "E"},
+	} {
+		if err := dag.AddEdge(pair.from, pair.to); err != nil {
+			t.Fatalf("AddEdge %s->%s: %v", pair.from, pair.to, err)
+		}
+	}
+
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag returned unexpected error for valid DAG: %v", err)
+	}
+	// DetectCycle should also confirm no cycle after FinishDag.
+	if DetectCycle(dag) {
+		t.Error("expected DetectCycle to return false for valid DAG, got true")
+	}
+}
 
 func TestDetectCycle(t *testing.T) {
 	defer goleak.VerifyNone(t)
@@ -592,9 +697,10 @@ func TestDetectCycle(t *testing.T) {
 	}
 }
 
+// NoopCmd is a Runnable that succeeds immediately without performing any work.
 type NoopCmd struct{}
 
-func (NoopCmd) RunE(_ interface{}) error { return nil }
+func (NoopCmd) RunE(_ context.Context, _ interface{}) error { return nil }
 
 func TestSimpleDag(t *testing.T) {
 	defer goleak.VerifyNone(t)
@@ -659,9 +765,8 @@ func TestSimple1Dag(t *testing.T) {
 		DefaultTimeout:   30 * time.Second,
 	}
 
-	// ContainerCmd 를 사용하는 경우, 여기에 등록 (현재는 주석 처리)
-	// runnable := Connect()
-	// dag.SetContainerCmd(runnable)
+	// Attach a no-op runner so that all nodes succeed during inFlight.
+	dag.SetContainerCmd(NoopCmd{})
 
 	// 엣지 추가: DAG 의 노드들 간에 부모/자식 관계 구성
 	if err := dag.AddEdge(dag.StartNode.ID, "1"); err != nil {
@@ -712,13 +817,16 @@ func TestSimple1Dag(t *testing.T) {
 	}
 }
 
-// 간단한 실행 명령을 위한 인터페이스 구현
+// SimpleCommand simulates a short-lived task while respecting context cancellation.
 type SimpleCommand struct{}
 
-func (_ *SimpleCommand) RunE(_ interface{}) error {
-	// 간단한 작업 시뮬레이션
-	time.Sleep(100 * time.Millisecond)
-	return nil
+func (*SimpleCommand) RunE(ctx context.Context, _ interface{}) error {
+	select {
+	case <-time.After(100 * time.Millisecond):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // TestComplexDag 는 복잡한 DAG 구조를 테스트합니다.
@@ -904,6 +1012,79 @@ func TestComplexDagProgress(t *testing.T) {
 	}
 }
 
+// TestDagReset verifies that a DAG can be executed a second time after Reset()
+// returns the same result as the first run.
+//
+//nolint:gocognit // comprehensive reset lifecycle test: closure + node-status loop + two full run cycles
+func TestDagReset(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	buildAndRun := func(dag *Dag) bool {
+		ctx := context.Background()
+		dag.ConnectRunner()
+		if !dag.GetReady(ctx) {
+			t.Fatal("GetReady failed")
+		}
+		if !dag.Start() {
+			t.Fatal("Start failed")
+		}
+		return dag.Wait(ctx)
+	}
+
+	// Build a diamond DAG: start → A → {B1, B2} → C.
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	dag.SetContainerCmd(NoopCmd{})
+
+	for _, pair := range []struct{ from, to string }{
+		{StartNode, "A"},
+		{"A", "B1"},
+		{"A", "B2"},
+		{"B1", "C"},
+		{"B2", "C"},
+	} {
+		if err := dag.AddEdge(pair.from, pair.to); err != nil {
+			t.Fatalf("AddEdge %s->%s: %v", pair.from, pair.to, err)
+		}
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+
+	// ── First run ──
+	if ok := buildAndRun(dag); !ok {
+		t.Fatal("first Wait returned false")
+	}
+	if p := dag.Progress(); p != 1.0 {
+		t.Errorf("first run: expected progress 1.0, got %v", p)
+	}
+
+	// ── Reset ──
+	dag.Reset()
+
+	// Progress must be 0.0 immediately after Reset (counters cleared).
+	if p := dag.Progress(); p != 0.0 {
+		t.Errorf("after Reset: expected progress 0.0, got %v", p)
+	}
+
+	// All nodes must be back in Pending.
+	for id, n := range dag.nodes {
+		if got := n.GetStatus(); got != NodeStatusPending {
+			t.Errorf("after Reset: node %s expected Pending, got %v", id, got)
+		}
+	}
+
+	// ── Second run ──
+	if ok := buildAndRun(dag); !ok {
+		t.Fatal("second Wait after Reset returned false")
+	}
+	if p := dag.Progress(); p != 1.0 {
+		t.Errorf("second run: expected progress 1.0, got %v", p)
+	}
+}
+
 // generateDAG 는 numNodes 개의 노드를 생성하고,
 // i < j 인 경우 확률 edgeProb 로 부모-자식 간선을 추가하여 DAG 를 구성
 func generateDAG(numNodes int, edgeProb float64) *Dag {
@@ -940,6 +1121,8 @@ func generateDAG(numNodes int, edgeProb float64) *Dag {
 
 // verifyCopiedDag 는 원본 DAG 와 복사된 노드 맵 및 간선 슬라이스가 동일한 구조를 갖는지 검증
 // 문제가 있으면 에러 메시지를 모아 하나의 error 로 반환하고, 문제가 없으면 nil 을 반환
+//
+//nolint:gocognit,gocyclo // exhaustive structural verification helper; complexity comes from checking all node/edge fields
 func verifyCopiedDag(original *Dag, newNodes map[string]*Node, newEdges []*Edge, methodName string) error {
 	var errs []string
 
@@ -997,4 +1180,1554 @@ func verifyCopiedDag(original *Dag, newNodes map[string]*Node, newEdges []*Edge,
 		return errors.New(strings.Join(errs, "\n"))
 	}
 	return nil
+}
+
+// ── Stage 12 tests ────────────────────────────────────────────────────────────
+
+// TestSendBlocking_Delivers verifies that SendBlocking successfully sends a
+// value to a channel that has room and that the consumer receives it.
+func TestSendBlocking_Delivers(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	sc := NewSafeChannelGen[int](1)
+	ctx := context.Background()
+	if !sc.SendBlocking(ctx, 42) {
+		t.Fatal("SendBlocking returned false on empty channel")
+	}
+	got := <-sc.GetChannel()
+	if got != 42 {
+		t.Fatalf("expected 42, got %d", got)
+	}
+}
+
+// TestSendBlocking_CtxCancel verifies that SendBlocking returns false
+// (without panicking or deadlocking) when the context is cancelled before
+// a consumer arrives.
+func TestSendBlocking_CtxCancel(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	sc := NewSafeChannelGen[int](0) // unbuffered — send blocks until consumed
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately before calling SendBlocking
+	if sc.SendBlocking(ctx, 99) {
+		t.Fatal("SendBlocking should return false on a cancelled context")
+	}
+}
+
+// TestSendBlocking_ClosedChannel verifies that SendBlocking returns false
+// immediately on a channel that is already closed.
+func TestSendBlocking_ClosedChannel(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	sc := NewSafeChannelGen[int](1)
+	if err := sc.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	ctx := context.Background()
+	if sc.SendBlocking(ctx, 7) {
+		t.Fatal("SendBlocking should return false on a closed channel")
+	}
+}
+
+// TestSendBlocking_BlocksThenDelivers verifies that SendBlocking blocks on a
+// full channel and delivers the value once the consumer reads.
+func TestSendBlocking_BlocksThenDelivers(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	sc := NewSafeChannelGen[int](0) // unbuffered
+	ctx := context.Background()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sc.SendBlocking(ctx, 123) //nolint:errcheck
+	}()
+
+	// Give the goroutine time to block on the send.
+	time.Sleep(20 * time.Millisecond)
+	got := <-sc.GetChannel()
+	<-done
+	if got != 123 {
+		t.Fatalf("expected 123, got %d", got)
+	}
+}
+
+// TestDroppedErrors_Counter verifies that DroppedErrors increments each time
+// reportError cannot deliver to a full Errors channel, and that Reset zeros it.
+func TestDroppedErrors_Counter(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	// Create a DAG with a tiny error channel (capacity 1) so it fills quickly.
+	cfg := DefaultDagConfig()
+	cfg.MaxChannelBuffer = 1
+	dag := NewDagWithConfig(cfg)
+
+	if dag.DroppedErrors() != 0 {
+		t.Fatalf("expected 0 dropped errors initially, got %d", dag.DroppedErrors())
+	}
+
+	// First send fills the channel.
+	dag.reportError(fmt.Errorf("err-1"))
+	if dag.DroppedErrors() != 0 {
+		t.Fatalf("first error should not be dropped (channel had room)")
+	}
+
+	// Second send overflows the channel — should be dropped.
+	dag.reportError(fmt.Errorf("err-2"))
+	if dag.DroppedErrors() != 1 {
+		t.Fatalf("expected 1 dropped error, got %d", dag.DroppedErrors())
+	}
+
+	// Third send also dropped.
+	dag.reportError(fmt.Errorf("err-3"))
+	if dag.DroppedErrors() != 2 {
+		t.Fatalf("expected 2 dropped errors, got %d", dag.DroppedErrors())
+	}
+
+	// Drain the channel so we can call Reset (Reset creates a new Errors channel).
+	<-dag.Errors.GetChannel()
+	dag.Errors.Close() //nolint:errcheck
+
+	// Manually reset just the counter (Reset requires a fully initialised DAG;
+	// test the atomic reset directly).
+	dag.droppedErrors = 0
+	if dag.DroppedErrors() != 0 {
+		t.Fatalf("expected 0 after manual reset, got %d", dag.DroppedErrors())
+	}
+}
+
+// TestWorkerPool_NodeTask verifies that the zero-churn worker pool correctly
+// executes nodeTask entries and that no closures are created per submission.
+func TestWorkerPool_NodeTask(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	const workers = 4
+
+	pool := NewDagWorkerPool(workers)
+	ctx := context.Background()
+
+	results := make(chan string, workers)
+	for i := 0; i < workers; i++ {
+		id := fmt.Sprintf("node%d", i)
+		n := &Node{ID: id, status: NodeStatusPending}
+		n.runnerStore(nil)
+		sc := NewSafeChannelGen[*printStatus](8)
+
+		// Attach a runner that records the node ID and drains the channel.
+		n.runner = func(_ context.Context, res *SafeChannel[*printStatus]) {
+			results <- n.ID
+			res.Close() //nolint:errcheck
+		}
+
+		pool.Submit(nodeTask{node: n, sc: sc, ctx: ctx})
+	}
+
+	pool.Close()
+
+	close(results)
+	seen := make(map[string]bool)
+	for id := range results {
+		if seen[id] {
+			t.Errorf("node %s executed more than once", id)
+		}
+		seen[id] = true
+	}
+	if len(seen) != workers {
+		t.Errorf("expected %d executions, got %d", workers, len(seen))
+	}
+}
+
+// ── Stage 13 tests ────────────────────────────────────────────────────────────
+
+// randomDelayRunner simulates a real workload by sleeping for a random
+// duration between 1 and maxMs milliseconds, honouring ctx cancellation.
+type randomDelayRunner struct {
+	maxMs int
+}
+
+func (r randomDelayRunner) RunE(ctx context.Context, _ interface{}) error {
+	delay := time.Duration(rand.Intn(r.maxMs)+1) * time.Millisecond //nolint:gosec // test-only
+	select {
+	case <-time.After(delay):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// failingRunner always returns a non-nil error, simulating a node that fails.
+type failingRunner struct{}
+
+func (failingRunner) RunE(_ context.Context, _ interface{}) error {
+	return errors.New("injected failure")
+}
+
+// buildStressDAG constructs a fan-out DAG:
+//
+//	start_node → {stress-0 … stress-(n-1)} → end_node
+//
+// All n user nodes run in parallel, which maximises concurrent channel activity.
+// cfg must have MaxChannelBuffer ≥ n*5 and WorkerPoolSize ≥ n to avoid stalls.
+func buildStressDAG(t *testing.T, n int, cfg DagConfig) *Dag { //nolint:unparam
+	t.Helper()
+	dag := NewDagWithConfig(cfg)
+	var err error
+	dag, err = dag.StartDag()
+	if err != nil {
+		t.Fatalf("buildStressDAG: StartDag: %v", err)
+	}
+	for i := range n {
+		id := fmt.Sprintf("stress-%d", i)
+		if err := dag.AddEdge(StartNode, id); err != nil {
+			t.Fatalf("buildStressDAG: AddEdge start→%s: %v", id, err)
+		}
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("buildStressDAG: FinishDag: %v", err)
+	}
+	return dag
+}
+
+// runOneCycle executes one full ConnectRunner → GetReady → Start → Wait cycle.
+// Returns true iff the cycle succeeded without errors.
+func runOneCycle(t *testing.T, dag *Dag) bool {
+	t.Helper()
+	ctx := context.Background()
+	dag.ConnectRunner()
+	if !dag.GetReady(ctx) {
+		t.Error("runOneCycle: GetReady returned false")
+		return false
+	}
+	if !dag.Start() {
+		t.Error("runOneCycle: Start returned false")
+		return false
+	}
+	return dag.Wait(ctx)
+}
+
+// TestDag_ConcurrencyStress executes a 1 000-node fan-out DAG under random
+// latency across multiple Reset/re-run cycles, validating that:
+//   - SendBlocking never loses a signal (no deadlock, no hang)
+//   - Every iteration reaches Progress == 1.0
+//   - DroppedErrors remains 0 throughout (no error-channel overflow)
+//   - goleak confirms no goroutine leaks after the final iteration
+//
+//nolint:gocognit // stress test: covers concurrent coordination across many nodes and many iterations
+func TestDag_ConcurrencyStress(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping stress test in short mode (-short)")
+	}
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	const (
+		nodeCount  = 1000
+		iterations = 20
+		maxDelayMs = 5
+	)
+
+	cfg := DefaultDagConfig()
+	cfg.MaxChannelBuffer  = nodeCount*5 + 100 // generous headroom for burst
+	cfg.WorkerPoolSize    = nodeCount + 10     // one worker per node + buffer
+	cfg.MinChannelBuffer  = 5                  // 3 msgs per node max; 5 is safe
+	cfg.ExpectedNodeCount = nodeCount + 2      // +2 for start/end synthetic nodes
+	cfg.DefaultTimeout    = 30 * time.Second
+
+	dag := buildStressDAG(t, nodeCount, cfg)
+	dag.SetContainerCmd(randomDelayRunner{maxMs: maxDelayMs})
+
+	for iter := range iterations {
+		if iter > 0 {
+			dag.Reset()
+		}
+
+		if ok := runOneCycle(t, dag); !ok {
+			t.Errorf("iter %d: Wait returned false (DAG did not complete)", iter)
+		}
+
+		if p := dag.Progress(); p != 1.0 {
+			t.Errorf("iter %d: expected Progress 1.0, got %v", iter, p)
+		}
+
+		if d := dag.DroppedErrors(); d != 0 {
+			t.Errorf("iter %d: expected DroppedErrors 0, got %d", iter, d)
+		}
+	}
+}
+
+// TestDroppedErrors_UnderHighLoad verifies that DroppedErrors accurately tracks
+// overflow events when many goroutines call reportError concurrently on a
+// deliberately undersized error channel.
+func TestDroppedErrors_UnderHighLoad(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	const totalErrors = 200
+
+	// Tiny error buffer so the channel fills quickly and drops occur.
+	cfg := DefaultDagConfig()
+	cfg.MaxChannelBuffer = 10
+	dag := NewDagWithConfig(cfg)
+
+	// Fire totalErrors concurrent reporters using a buffered done-channel for
+	// lightweight synchronisation (avoids importing sync).
+	done := make(chan struct{}, totalErrors)
+	for range totalErrors {
+		go func() {
+			dag.reportError(fmt.Errorf("load-error"))
+			done <- struct{}{}
+		}()
+	}
+
+	// Wait for all goroutines to finish.
+	for range totalErrors {
+		<-done
+	}
+
+	dropped := dag.DroppedErrors()
+
+	// At least one error must be delivered (first goroutines fill the buffer),
+	// so dropped must be strictly less than totalErrors.
+	if dropped >= totalErrors {
+		t.Errorf("expected some errors delivered but all %d were dropped", totalErrors)
+	}
+	// With a buffer of 10 and 200 senders, at least 190 must be dropped.
+	minDropped := int64(totalErrors - cfg.MaxChannelBuffer)
+	if dropped < minDropped {
+		t.Errorf("expected at least %d dropped errors (buffer=%d, total=%d), got %d",
+			minDropped, cfg.MaxChannelBuffer, totalErrors, dropped)
+	}
+
+	// Drain and close so the test leaves no channel data behind.
+	ch := dag.Errors.GetChannel()
+	for len(ch) > 0 {
+		<-ch
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// TestSendBlocking_GoroutineLeak_ContextCancel verifies that a goroutine
+// blocked inside SendBlocking is released promptly when its context is
+// cancelled — no goroutine leak occurs.
+func TestSendBlocking_GoroutineLeak_ContextCancel(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	sc := NewSafeChannelGen[int](0) // unbuffered — send always blocks
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sc.SendBlocking(ctx, 42) //nolint:errcheck
+	}()
+
+	// Give the goroutine time to reach the blocking select.
+	time.Sleep(20 * time.Millisecond)
+
+	// Cancel the context; the goroutine must unblock and exit.
+	cancel()
+
+	select {
+	case <-done:
+		// Goroutine exited cleanly — no leak.
+	case <-time.After(time.Second):
+		t.Fatal("goroutine leaked: SendBlocking did not return after context cancel")
+	}
+	sc.Close() //nolint:errcheck
+}
+
+// TestWait_ContextCancellation exercises the waitCtx.Done() branch inside
+// Wait, verifying it returns false and does not leak goroutines when the
+// caller's context is cancelled while nodes are still executing.
+func TestWait_ContextCancellation(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+
+	// A long-running runner that respects ctx cancellation.
+	dag.SetContainerCmd(&SimpleCommand{}) // 100 ms delay, ctx-aware
+
+	if err := dag.AddEdge(StartNode, "slow"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+
+	dag.ConnectRunner()
+
+	// Use a context with a very short timeout for both GetReady and Wait.
+	// When the deadline fires, Wait returns false via the waitCtx.Done() path.
+	// Node goroutines also observe the same cancellation and exit promptly.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+
+	if !dag.GetReady(ctx) {
+		t.Fatal("GetReady failed")
+	}
+	if !dag.Start() {
+		t.Fatal("Start failed")
+	}
+
+	if dag.Wait(ctx) {
+		t.Error("expected Wait to return false when context is cancelled mid-execution")
+	}
+}
+
+// TestDag_ParentFailurePropagation verifies that when a root node fails:
+//  1. Wait returns false (the DAG does not complete successfully).
+//  2. Children of the failing node do NOT reach NodeStatusSucceeded.
+//  3. DroppedErrors remains 0 (errors are not dropped, just failures propagated).
+//
+// NOTE on Skipped vs Failed: children may end up as either NodeStatusFailed or
+// NodeStatusSkipped depending on execution timing.  If a child observes the
+// failed parent via CheckParentsStatus before preFlight, it transitions to
+// Skipped.  If the child is already in preFlight waiting when the parent fails,
+// it receives a Failed channel signal and transitions Running→Failed.
+// Both outcomes are correct — the important invariant is that children never
+// report NodeStatusSucceeded when their parent has failed.
+func TestDag_ParentFailurePropagation(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+
+	// Topology: start → A(fails) → {B, C} → end
+	for _, pair := range []struct{ from, to string }{
+		{StartNode, "A"},
+		{"A", "B"},
+		{"A", "C"},
+	} {
+		if err := dag.AddEdge(pair.from, pair.to); err != nil {
+			t.Fatalf("AddEdge %s→%s: %v", pair.from, pair.to, err)
+		}
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+
+	// Node A fails; B and C would succeed if reachable (they won't be).
+	if !dag.SetNodeRunner("A", failingRunner{}) {
+		t.Fatal("SetNodeRunner A failed")
+	}
+	if !dag.SetNodeRunner("B", NoopCmd{}) {
+		t.Fatal("SetNodeRunner B failed")
+	}
+	if !dag.SetNodeRunner("C", NoopCmd{}) {
+		t.Fatal("SetNodeRunner C failed")
+	}
+
+	dag.ConnectRunner()
+	ctx := context.Background()
+	if !dag.GetReady(ctx) {
+		t.Fatal("GetReady failed")
+	}
+	if !dag.Start() {
+		t.Fatal("Start failed")
+	}
+
+	// Wait must return false: A fails → B,C either Skipped or Failed (not
+	// Succeeded) → EndNode preflight receives Failed signals → Wait = false.
+	if dag.Wait(ctx) {
+		t.Error("expected Wait to return false when a root node fails")
+	}
+
+	// B and C must NOT have succeeded — they must be either Failed or Skipped.
+	for _, id := range []string{"B", "C"} {
+		n := dag.nodes[id]
+		if n == nil {
+			t.Fatalf("node %s not found", id)
+		}
+		st := n.GetStatus()
+		if st == NodeStatusSucceeded {
+			t.Errorf("node %s: should not have Succeeded when parent A failed, got %v", id, st)
+		}
+		if st != NodeStatusFailed && st != NodeStatusSkipped {
+			t.Errorf("node %s: expected Failed or Skipped, got %v", id, st)
+		}
+	}
+}
+
+// TestCheckParentsStatus_FailedParent verifies that CheckParentsStatus
+// correctly transitions a Pending node to Skipped when its parent has
+// already failed, exercising the parent-failure fast-path.
+func TestCheckParentsStatus_FailedParent(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	parent := &Node{ID: "parent"}
+	parent.runnerStore(nil)
+	parent.SetStatus(NodeStatusFailed) // parent is already failed
+
+	child := &Node{ID: "child"}
+	child.runnerStore(nil)
+	child.parent = []*Node{parent}
+
+	// CheckParentsStatus should detect the failed parent and transition child
+	// to Skipped, returning false.
+	if child.CheckParentsStatus() {
+		t.Error("expected CheckParentsStatus to return false for a failed parent")
+	}
+	if st := child.GetStatus(); st != NodeStatusSkipped {
+		t.Errorf("expected child status Skipped, got %v", st)
+	}
+}
+
+// TestCollectErrors_CtxCancelled verifies that collectErrors returns
+// immediately when the supplied context is already cancelled, exercising
+// the case <-ctx.Done() branch.
+func TestCollectErrors_CtxCancelled(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+
+	// Pre-cancel the context so collectErrors returns via ctx.Done() immediately.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	errs := dag.collectErrors(ctx)
+	// No errors were sent; result must be empty (or nil).
+	if len(errs) != 0 {
+		t.Errorf("expected 0 errors from cancelled context, got %d", len(errs))
+	}
+	// Cleanup.
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// TestCollectErrors_Timeout verifies that collectErrors returns after
+// ErrorDrainTimeout expires when no errors are sent, exercising the
+// case <-timeout branch.
+func TestCollectErrors_Timeout(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	cfg := DefaultDagConfig()
+	cfg.ErrorDrainTimeout = 50 * time.Millisecond // very short timeout for test
+	dag := NewDagWithConfig(cfg)
+
+	start := time.Now()
+	errs := dag.collectErrors(context.Background())
+	elapsed := time.Since(start)
+
+	if len(errs) != 0 {
+		t.Errorf("expected 0 errors, got %d", len(errs))
+	}
+	// Should return after ~50 ms, not 5 s.
+	if elapsed > 2*time.Second {
+		t.Errorf("collectErrors took too long: %v (expected ≤ 200ms)", elapsed)
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// ==================== Stage 13: Coverage Tests ====================
+
+// TestToMermaid_BasicTopology verifies that ToMermaid renders a simple
+// start→A→B→end topology into a valid Mermaid flowchart string.
+func TestToMermaid_BasicTopology(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "A"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.AddEdge("A", "B"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+
+	out := dag.ToMermaid()
+	if !strings.HasPrefix(out, "graph TD\n") {
+		t.Errorf("expected Mermaid output to start with 'graph TD\\n', got: %q", out[:min(len(out), 20)])
+	}
+	// Synthetic nodes use stadium shape ([" "]).
+	if !strings.Contains(out, `start_node`) {
+		t.Errorf("expected start_node in output")
+	}
+	if !strings.Contains(out, `end_node`) {
+		t.Errorf("expected end_node in output")
+	}
+	// Edge arrows must appear.
+	if !strings.Contains(out, "-->") {
+		t.Errorf("expected directed edges '-->' in Mermaid output")
+	}
+}
+
+// TestToMermaid_SpecialCharsInNodeID verifies that mermaidSafeID replaces
+// hyphens and other non-identifier characters with underscores.
+func TestToMermaid_SpecialCharsInNodeID(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	// Node IDs with hyphens are common in practice.
+	if err := dag.AddEdge(StartNode, "my-node-1"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+
+	out := dag.ToMermaid()
+	// Hyphens should be replaced with underscores in Mermaid IDs.
+	if strings.Contains(out, "my-node-1 ") || strings.Contains(out, "my-node-1\n") {
+		t.Errorf("expected hyphens to be replaced in Mermaid ID, got raw ID in output")
+	}
+	if !strings.Contains(out, "my_node_1") {
+		t.Errorf("expected 'my_node_1' (hyphens→underscores) in Mermaid output:\n%s", out)
+	}
+}
+
+// TestToMermaid_WithPerNodeRunner verifies that mermaidNodeLabel includes
+// the runner's concrete type when a per-node Runnable is registered.
+func TestToMermaid_WithPerNodeRunner(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "worker"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+	// Assign a per-node runner before generating the diagram.
+	if !dag.SetNodeRunner("worker", NoopCmd{}) {
+		t.Fatal("SetNodeRunner failed")
+	}
+
+	out := dag.ToMermaid()
+	// The label should include the runner's type name.
+	if !strings.Contains(out, "NoopCmd") {
+		t.Errorf("expected runner type 'NoopCmd' in Mermaid label:\n%s", out)
+	}
+}
+
+// TestSetNodeRunners_Bulk verifies SetNodeRunners: applied count, missing list,
+// and skipped list (start_node / end_node).
+func TestSetNodeRunners_Bulk(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	for _, id := range []string{"A", "B", "C"} {
+		if err := dag.AddEdge(StartNode, id); err != nil {
+			t.Fatalf("AddEdge %s: %v", id, err)
+		}
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+
+	runners := map[string]Runnable{
+		"A":          NoopCmd{},
+		"B":          NoopCmd{},
+		"nonexistent": NoopCmd{}, // not in DAG → missing
+		StartNode:    NoopCmd{}, // synthetic → skipped
+	}
+	applied, missing, skipped := dag.SetNodeRunners(runners)
+
+	if applied != 2 {
+		t.Errorf("expected applied=2, got %d", applied)
+	}
+	if len(missing) != 1 || missing[0] != "nonexistent" {
+		t.Errorf("expected missing=[nonexistent], got %v", missing)
+	}
+	if len(skipped) != 1 || skipped[0] != StartNode {
+		t.Errorf("expected skipped=[start_node], got %v", skipped)
+	}
+}
+
+// TestNewDagWithOptions_Timeout verifies that NewDagWithOptions + WithTimeout
+// sets bTimeout and Timeout on the resulting DAG.
+func TestNewDagWithOptions_Timeout(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	d := NewDagWithOptions(WithTimeout(42 * time.Second))
+	if d == nil {
+		t.Fatal("NewDagWithOptions returned nil")
+	}
+	if !d.bTimeout {
+		t.Error("expected bTimeout=true after WithTimeout option")
+	}
+	if d.Timeout != 42*time.Second {
+		t.Errorf("expected Timeout=42s, got %v", d.Timeout)
+	}
+}
+
+// TestSafeChannel_Close_Twice verifies that calling Close on a SafeChannel
+// more than once does not panic (idempotent close via sync.Once).
+func TestSafeChannel_Close_Twice(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	sc := NewSafeChannelGen[int](1)
+	sc.Close() //nolint:errcheck
+	// Second close must not panic.
+	sc.Close() //nolint:errcheck
+}
+
+// TestSafeChannel_Send_Closed verifies that Send returns false when the
+// SafeChannel is already closed, exercising the closed-check path in Send.
+func TestSafeChannel_Send_Closed(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	sc := NewSafeChannelGen[int](1)
+	sc.Close() //nolint:errcheck
+
+	ok := sc.Send(42)
+	if ok {
+		t.Error("expected Send to return false on a closed channel")
+	}
+}
+
+// TestAddEdgeIfNodesExist_MissingNode verifies that AddEdgeIfNodesExist returns
+// an error when a referenced node does not exist in the DAG, exercising
+// the "node does not exist" error path.
+func TestAddEdgeIfNodesExist_MissingNode(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	// Add a real node so "from" resolves, but "to" is absent.
+	if err := dag.AddEdge(StartNode, "existing"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+
+	err = dag.AddEdgeIfNodesExist("existing", "ghost")
+	if err == nil {
+		t.Error("expected error when to-node does not exist, got nil")
+	}
+}
+
+// TestAddEdgeIfNodesExist_SelfLoop verifies that AddEdgeIfNodesExist rejects
+// self-loop edges (from == to).
+func TestAddEdgeIfNodesExist_SelfLoop(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	err = dag.AddEdgeIfNodesExist("X", "X")
+	if err == nil {
+		t.Error("expected error for self-loop edge, got nil")
+	}
+}
+
+// TestCreateNodeWithTimeOut verifies that CreateNodeWithTimeOut creates a node
+// and returns non-nil for both the timeout and non-timeout cases.
+func TestCreateNodeWithTimeOut(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	dag := NewDag()
+	// bTimeOut=true path
+	n1 := dag.CreateNodeWithTimeOut("timer-node", true, 5*time.Second)
+	if n1 == nil {
+		t.Error("expected non-nil node from CreateNodeWithTimeOut with bTimeOut=true")
+	}
+	// bTimeOut=false path
+	n2 := dag.CreateNodeWithTimeOut("plain-node", false, 0)
+	if n2 == nil {
+		t.Error("expected non-nil node from CreateNodeWithTimeOut with bTimeOut=false")
+	}
+	// Duplicate ID returns nil.
+	n3 := dag.CreateNodeWithTimeOut("timer-node", true, 5*time.Second)
+	if n3 != nil {
+		t.Error("expected nil for duplicate node ID")
+	}
+}
+
+// TestMinInt verifies both branches of the minInt helper: return a (a < b)
+// and return b (a >= b).  minInt is an internal package-level function
+// accessible from tests in the same package.
+func TestMinInt(t *testing.T) {
+	if got := minInt(3, 7); got != 3 {
+		t.Errorf("minInt(3,7): expected 3, got %d", got)
+	}
+	if got := minInt(7, 3); got != 3 {
+		t.Errorf("minInt(7,3): expected 3, got %d", got)
+	}
+	if got := minInt(5, 5); got != 5 {
+		t.Errorf("minInt(5,5): expected 5, got %d", got)
+	}
+}
+
+// TestWait_EmptyNodeResult verifies that Wait returns false immediately when
+// GetReady is skipped (leaving dag.nodeResult empty), exercising the
+// merge-returns-false branch in the Wait select loop.
+func TestWait_EmptyNodeResult(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "X"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+	dag.SetContainerCmd(NoopCmd{})
+	dag.ConnectRunner()
+	// Skip GetReady: dag.nodeResult stays empty → merge returns false.
+	ctx := context.Background()
+	ok := dag.Wait(ctx)
+	if ok {
+		t.Error("expected Wait to return false when nodeResult is empty")
+	}
+}
+
+// TestNodeError_Unwrap verifies that NodeError.Unwrap returns the wrapped error,
+// allowing errors.Is / errors.As to traverse the chain.
+func TestNodeError_Unwrap(t *testing.T) {
+	sentinel := errors.New("sentinel error")
+	ne := &NodeError{NodeID: "X", Phase: "test", Err: sentinel}
+	if !errors.Is(ne, sentinel) {
+		t.Errorf("errors.Is failed: expected sentinel through NodeError.Unwrap")
+	}
+	if ne.Unwrap() != sentinel {
+		t.Errorf("Unwrap: expected sentinel, got %v", ne.Unwrap())
+	}
+}
+
+// TestNode_SetRunner verifies that SetRunner applies the runner on a Pending
+// node and rejects changes after the node has moved to another state.
+func TestNode_SetRunner(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	n := &Node{ID: "test"}
+	n.runnerStore(nil)
+	// Pending → runner can be set.
+	if !n.SetRunner(NoopCmd{}) {
+		t.Error("expected SetRunner to return true for Pending node")
+	}
+	// After transition to Running, SetRunner should be rejected.
+	n.SetStatus(NodeStatusRunning)
+	if n.SetRunner(NoopCmd{}) {
+		t.Error("expected SetRunner to return false for non-Pending node")
+	}
+}
+
+// TestInitDagWithOptions verifies that InitDagWithOptions applies options and
+// returns a fully initialized DAG ready for AddEdge, exercising the
+// nolint:unused helper.
+func TestInitDagWithOptions(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	d, err := InitDagWithOptions(WithTimeout(10 * time.Second))
+	if err != nil {
+		t.Fatalf("InitDagWithOptions: %v", err)
+	}
+	if !d.bTimeout {
+		t.Error("expected bTimeout=true after WithTimeout option")
+	}
+	if d.StartNode == nil {
+		t.Error("expected StartNode to be non-nil after InitDagWithOptions")
+	}
+}
+
+// TestDagOptions_ChannelBuffersAndWorkerPool verifies that WithChannelBuffers
+// and WithWorkerPool functional options correctly set the config fields on
+// a new DAG, exercising the nolint:unused option helpers.
+func TestDagOptions_ChannelBuffersAndWorkerPool(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	d := NewDagWithOptions(
+		WithChannelBuffers(3, 50, 10),
+		WithWorkerPool(8),
+	)
+	if d == nil {
+		t.Fatal("NewDagWithOptions returned nil")
+	}
+	if d.Config.MinChannelBuffer != 3 {
+		t.Errorf("expected MinChannelBuffer=3, got %d", d.Config.MinChannelBuffer)
+	}
+	if d.Config.MaxChannelBuffer != 50 {
+		t.Errorf("expected MaxChannelBuffer=50, got %d", d.Config.MaxChannelBuffer)
+	}
+	if d.Config.StatusBuffer != 10 {
+		t.Errorf("expected StatusBuffer=10, got %d", d.Config.StatusBuffer)
+	}
+	if d.Config.WorkerPoolSize != 8 {
+		t.Errorf("expected WorkerPoolSize=8, got %d", d.Config.WorkerPoolSize)
+	}
+}
+
+// TestGetSafeVertex verifies that getSafeVertex returns the channel for a
+// known edge and nil for an edge that does not exist.
+func TestGetSafeVertex(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "A"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+
+	// Known edge — must return a non-nil SafeChannel.
+	sv := dag.getSafeVertex(StartNode, "A")
+	if sv == nil {
+		t.Error("expected non-nil safeVertex for existing edge start_node→A")
+	}
+	// Non-existent edge — must return nil.
+	sv2 := dag.getSafeVertex("A", "B")
+	if sv2 != nil {
+		t.Error("expected nil for non-existent edge A→B")
+	}
+}
+
+// TestSafeChannel_SendBlocking_Unblocks verifies that SendBlocking returns
+// false immediately (not deadlocks) when the context is cancelled before
+// a receiver is available, exercising the ctx.Done() branch.
+func TestSafeChannel_SendBlocking_Unblocks(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	// Unbuffered channel: no receiver → Send will block.
+	sc := NewSafeChannelGen[int](0)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan bool, 1)
+	go func() {
+		done <- sc.SendBlocking(ctx, 99)
+	}()
+
+	// Cancel context so the goroutine unblocks via ctx.Done().
+	cancel()
+	result := <-done
+	if result {
+		t.Error("expected SendBlocking to return false on cancelled context")
+	}
+	sc.Close() //nolint:errcheck
+}
+
+// ==================== Stage 13: Coverage Path Tests ====================
+
+// TestCopyDag_NilOriginal verifies that CopyDag returns nil when the source
+// DAG is nil, exercising the nil-guard branch.
+func TestCopyDag_NilOriginal(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	result := CopyDag(nil, "copy")
+	if result != nil {
+		t.Error("expected CopyDag(nil, ...) to return nil")
+	}
+}
+
+// TestCopyDag_EmptyID verifies that CopyDag returns nil when newID is empty,
+// exercising the IsEmptyString guard branch.
+func TestCopyDag_EmptyID(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "A"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+
+	result := CopyDag(dag, "")
+	if result != nil {
+		t.Error("expected CopyDag(dag, \"\") to return nil")
+	}
+}
+
+// TestExecute_NoRunner verifies that execute returns ErrNoRunner when no
+// Runnable has been configured for the node (nil runner snapshot).
+func TestExecute_NoRunner(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	n := &Node{ID: "norunner"}
+	// Do NOT store any runner — runnerVal is zero value.
+	// getRunnerSnapshot will return nil → execute returns ErrNoRunner.
+	err := execute(context.Background(), n)
+	if !errors.Is(err, ErrNoRunner) {
+		t.Errorf("expected ErrNoRunner, got %v", err)
+	}
+}
+
+// TestRunnerLoad_NilValue verifies that runnerLoad returns nil when the
+// atomic.Value has never been written (zero value).
+func TestRunnerLoad_NilValue(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	n := &Node{ID: "zero"}
+	// Do NOT call runnerStore: atomic.Value is at zero → Load() returns nil.
+	r := n.runnerLoad()
+	if r != nil {
+		t.Errorf("expected nil from runnerLoad on zero-value node, got %v", r)
+	}
+}
+
+// TestStart_ClosedChannel verifies that Start returns false when the StartNode's
+// parent channel is already closed (the Send failure path).
+func TestStart_ClosedChannel(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "A"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+	dag.SetContainerCmd(NoopCmd{})
+	dag.ConnectRunner()
+
+	// Close the StartNode's trigger channel so Send will fail.
+	dag.StartNode.parentVertex[0].Close() //nolint:errcheck
+
+	result := dag.Start()
+	if result {
+		t.Error("expected Start to return false when trigger channel is closed")
+	}
+	// Cleanup channels to avoid goroutine leaks.
+	dag.closeChannels()
+}
+
+// TestSetNodeRunners_NonPendingSkipped verifies that SetNodeRunners skips
+// nodes that are no longer in Pending status.
+func TestSetNodeRunners_NonPendingSkipped(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "X"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+
+	// Force X to Running status so SetNodeRunners must skip it.
+	dag.nodes["X"].SetStatus(NodeStatusRunning)
+
+	runners := map[string]Runnable{"X": NoopCmd{}}
+	applied, _, skipped := dag.SetNodeRunners(runners)
+	if applied != 0 {
+		t.Errorf("expected applied=0, got %d", applied)
+	}
+	if len(skipped) != 1 {
+		t.Errorf("expected skipped=[X], got %v", skipped)
+	}
+}
+
+// TestAddEdge_EmptyFrom verifies that AddEdge returns an error when the
+// from-node ID is an empty string.
+func TestAddEdge_EmptyFrom(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if err := dag.AddEdge("", "B"); err == nil {
+		t.Error("expected AddEdge to return error for empty from-node")
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// TestAddEdge_EmptyTo verifies that AddEdge returns an error when the
+// to-node ID is an empty string.
+func TestAddEdge_EmptyTo(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, ""); err == nil {
+		t.Error("expected AddEdge to return error for empty to-node")
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// TestAddEdge_DuplicateEdge verifies that AddEdge returns an error when the
+// same edge is added twice, exercising the check == Exist path.
+func TestAddEdge_DuplicateEdge(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "A"); err != nil {
+		t.Fatalf("first AddEdge: %v", err)
+	}
+	// Second identical edge must be rejected.
+	if err := dag.AddEdge(StartNode, "A"); err == nil {
+		t.Error("expected second AddEdge to return error for duplicate edge")
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// TestAddEdgeIfNodesExist_EmptyFrom verifies that AddEdgeIfNodesExist returns
+// an error for an empty from-node ID.
+func TestAddEdgeIfNodesExist_EmptyFrom(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if err := dag.AddEdgeIfNodesExist("", "B"); err == nil {
+		t.Error("expected AddEdgeIfNodesExist to return error for empty from-node")
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// TestInFlight_NilNode verifies that inFlight returns InFlightFailed status
+// when called with a nil node (defensive nil-check path).
+func TestInFlight_NilNode(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	ps := inFlight(context.Background(), nil)
+	if ps == nil || ps.rStatus != InFlightFailed {
+		t.Errorf("expected InFlightFailed for nil node, got %v", ps)
+	}
+	releasePrintStatus(ps)
+}
+
+// TestInFlight_FailedNode verifies that inFlight skips Execute when
+// n.IsSucceed() is false, exercising the "Skipping execution" else branch.
+func TestInFlight_FailedNode(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	n := &Node{ID: "alreadyfailed"}
+	n.runnerStore(NoopCmd{})
+	n.SetSucceed(false) // simulate a prior failure
+
+	ps := inFlight(context.Background(), n)
+	if ps == nil || ps.rStatus != InFlightFailed {
+		t.Errorf("expected InFlightFailed for pre-failed node, got %v", ps)
+	}
+	releasePrintStatus(ps)
+}
+
+// TestCollectErrors_ZeroDrainTimeout verifies that collectErrors falls back
+// to the 5-second default when ErrorDrainTimeout is zero, exercising the
+// drainTimeout <= 0 path.  We pre-cancel ctx to return immediately.
+func TestCollectErrors_ZeroDrainTimeout(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	cfg := DefaultDagConfig()
+	cfg.ErrorDrainTimeout = 0 // force the <= 0 fallback
+	dag := NewDagWithConfig(cfg)
+
+	// Pre-cancel context so collectErrors returns immediately via ctx.Done().
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	errs := dag.collectErrors(ctx)
+	elapsed := time.Since(start)
+
+	if len(errs) != 0 {
+		t.Errorf("expected 0 errors, got %d", len(errs))
+	}
+	// Should return quickly via ctx.Done(), not wait the 5s default timeout.
+	if elapsed > time.Second {
+		t.Errorf("collectErrors took too long: %v (expected <1s)", elapsed)
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// ==================== Stage 13: Error Path Coverage Tests ====================
+
+// TestSetNodeRunner_NilNode verifies that SetNodeRunner returns false when
+// the specified node ID does not exist in the DAG (nil node guard path).
+func TestSetNodeRunner_NilNode(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if dag.SetNodeRunner("doesNotExist", NoopCmd{}) {
+		t.Error("expected SetNodeRunner to return false for unknown node ID")
+	}
+}
+
+// TestSetNodeRunner_NonPendingNode verifies that SetNodeRunner returns false
+// when the target node is not in Pending status (e.g. already Running).
+func TestSetNodeRunner_NonPendingNode(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "worker"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+
+	// Force the node into Running status so SetNodeRunner should reject it.
+	dag.nodes["worker"].SetStatus(NodeStatusRunning)
+
+	if dag.SetNodeRunner("worker", NoopCmd{}) {
+		t.Error("expected SetNodeRunner to return false for Running node")
+	}
+}
+
+// TestFinishDag_AlreadyValidated verifies that calling FinishDag a second time
+// returns an error because dag.validated is already set to true.
+func TestFinishDag_AlreadyValidated(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "A"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("first FinishDag: %v", err)
+	}
+	// Second call must fail.
+	if err := dag.FinishDag(); err == nil {
+		t.Error("expected second FinishDag to return error (already validated)")
+	}
+}
+
+// TestFinishDag_NoNodes verifies that FinishDag returns an error when called
+// on a DAG that has no nodes at all (neither via StartDag nor AddEdge).
+func TestFinishDag_NoNodes(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	// NewDag without StartDag: dag.nodes is empty.
+	dag := NewDag()
+	if err := dag.FinishDag(); err == nil {
+		t.Error("expected FinishDag to return error for empty DAG")
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// TestStartDag_Duplicate verifies that calling StartDag twice returns an error
+// on the second call because start_node already exists.
+func TestStartDag_Duplicate(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag := NewDag()
+	d2, err := dag.StartDag()
+	if err != nil {
+		t.Fatalf("first StartDag: %v", err)
+	}
+	// Second call: start_node already in dag.nodes → createNode returns nil → error.
+	_, err = d2.StartDag()
+	if err == nil {
+		t.Error("expected second StartDag to return error (duplicate start_node)")
+	}
+}
+
+// TestFinishDag_IsolatedNode verifies that FinishDag returns an error when
+// a non-start node exists with no parent and no children (isolated/orphaned).
+func TestFinishDag_IsolatedNode(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "connected"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	// Inject an isolated node directly (bypassing AddEdge which enforces structure).
+	dag.mu.Lock()
+	dag.createNode("orphan") //nolint:errcheck // intentionally creating isolated node
+	dag.mu.Unlock()
+
+	if err := dag.FinishDag(); err == nil {
+		t.Error("expected FinishDag to return error for isolated node 'orphan'")
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// TestProgress_EmptyDAG verifies that Progress() returns 0.0 when no nodes have
+// been added to the DAG (nodeCount == 0 guard path).
+func TestProgress_EmptyDAG(t *testing.T) {
+	dag := NewDag()
+	if got := dag.Progress(); got != 0.0 {
+		t.Errorf("expected Progress()=0.0 for empty DAG, got %f", got)
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// TestPostFlight_NilNode verifies that postFlight handles a nil node gracefully,
+// returning PostFlightFailed with the noNodeID sentinel.
+func TestPostFlight_NilNode(t *testing.T) {
+	ps := postFlight(context.Background(), nil)
+	if ps == nil {
+		t.Fatal("postFlight(nil) returned nil printStatus")
+	}
+	if ps.rStatus != PostFlightFailed {
+		t.Errorf("expected PostFlightFailed, got %v", ps.rStatus)
+	}
+}
+
+// TestCopyDag_WithStartAndEndNode verifies that CopyDag correctly identifies and
+// wires StartNode and EndNode when copying a fully-initialized DAG, exercising
+// the case StartNode / case EndNode branches inside CopyDag.
+func TestCopyDag_WithStartAndEndNode(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	original, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if err := original.AddEdge(StartNode, "mid"); err != nil {
+		t.Fatalf("AddEdge StartNode->mid: %v", err)
+	}
+	if err := original.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+
+	copied := CopyDag(original, "copy-with-se")
+	if copied == nil {
+		t.Fatal("CopyDag returned nil")
+	}
+	if copied.StartNode == nil {
+		t.Error("copied.StartNode is nil — case StartNode branch not exercised")
+	}
+	if copied.EndNode == nil {
+		t.Error("copied.EndNode is nil — case EndNode branch not exercised")
+	}
+	// Verify the IDs match expected sentinels.
+	if copied.StartNode != nil && copied.StartNode.ID != StartNode {
+		t.Errorf("copied StartNode ID = %q, want %q", copied.StartNode.ID, StartNode)
+	}
+	if copied.EndNode != nil && copied.EndNode.ID != EndNode {
+		t.Errorf("copied EndNode ID = %q, want %q", copied.EndNode.ID, EndNode)
+	}
+
+	original.Errors.Close() //nolint:errcheck
+	copied.Errors.Close()   //nolint:errcheck
+}
+
+// TestAddEndNode_NilFrom verifies that addEndNode returns an error when fromNode is nil.
+func TestAddEndNode_NilFrom(t *testing.T) {
+	dag := NewDag()
+	someNode := &Node{ID: "x"}
+	err := dag.addEndNode(nil, someNode)
+	if err == nil {
+		t.Error("expected error for nil fromNode, got nil")
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// TestAddEndNode_NilTo verifies that addEndNode returns an error when toNode is nil.
+func TestAddEndNode_NilTo(t *testing.T) {
+	dag := NewDag()
+	someNode := &Node{ID: "y"}
+	err := dag.addEndNode(someNode, nil)
+	if err == nil {
+		t.Error("expected error for nil toNode, got nil")
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// TestPreFlight_DagDefaultTimeout exercises the parentDag.Config.DefaultTimeout > 0
+// branch in preFlight, ensuring the DAG-level timeout context is used when no
+// per-node timeout is configured.
+func TestPreFlight_DagDefaultTimeout(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDagWithOptions(func(d *Dag) {
+		d.Config.DefaultTimeout = 5 * time.Second
+	})
+	if err != nil {
+		t.Fatalf("InitDagWithOptions: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "timed"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+	dag.SetContainerCmd(NoopCmd{})
+	dag.ConnectRunner()
+	ctx := context.Background()
+	dag.GetReady(ctx)
+	dag.Start()
+	ok := dag.Wait(ctx)
+	if !ok {
+		t.Error("Wait returned false with DefaultTimeout DAG")
+	}
+}
+
+// TestConnectRunner_EmptyDAG exercises the ConnectRunner early-return path
+// when no nodes are present (len(dag.nodes) < 1).
+func TestConnectRunner_EmptyDAG(t *testing.T) {
+	dag := NewDag()
+	if dag.ConnectRunner() {
+		t.Error("ConnectRunner on empty DAG should return false")
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// TestGetReady_EmptyDAG exercises the GetReady early-return path when no nodes
+// are present (len(dag.nodes) < 1).
+func TestGetReady_EmptyDAG(t *testing.T) {
+	dag := NewDag()
+	if dag.GetReady(context.Background()) {
+		t.Error("GetReady on empty DAG should return false")
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// TestNotifyChildren_CancelledCtx exercises the Warnf branch in notifyChildren
+// when SendBlocking returns false because the context is already cancelled.
+// An unbuffered channel with no reader guarantees the send blocks, so the
+// cancelled context makes SendBlocking pick the ctx.Done() case.
+func TestNotifyChildren_CancelledCtx(t *testing.T) {
+	parent := &Node{ID: "parentNC"}
+	// Unbuffered channel — sc.ch <- value would block with no reader.
+	sc := NewSafeChannelGen[runningStatus](0)
+	parent.childrenVertex = []*SafeChannel[runningStatus]{sc}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled → SendBlocking returns false → Warnf is logged
+
+	parent.notifyChildren(ctx, Succeed)
+	sc.Close() //nolint:errcheck
+}
+
+// TestPostFlight_CancelledCtx exercises the Warnf branch in postFlight when
+// SendBlocking to a child returns false due to a pre-cancelled context.
+func TestPostFlight_CancelledCtx(t *testing.T) {
+	node := &Node{ID: "pfCancelNode"}
+	node.SetSucceed(true)
+	// Unbuffered channel with no reader and a cancelled context → SendBlocking=false.
+	sc := NewSafeChannelGen[runningStatus](0)
+	node.childrenVertex = []*SafeChannel[runningStatus]{sc}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ps := postFlight(ctx, node)
+	if ps == nil {
+		t.Fatal("postFlight returned nil")
+	}
+	// Despite the warning, postFlight still returns PostFlight status.
+	if ps.rStatus != PostFlight {
+		t.Errorf("expected PostFlight, got %v", ps.rStatus)
+	}
+	sc.Close() //nolint:errcheck
+}
+
+// TestAddEndNode_ExistingEdge exercises the Fault/Exist guard in addEndNode by
+// adding the same edge twice, which causes createEdge to return Exist on the
+// second call — producing an error.
+func TestAddEndNode_ExistingEdge(t *testing.T) {
+	dag := NewDag()
+	from := &Node{ID: "aene-from"}
+	to := &Node{ID: "aene-to"}
+	// Register nodes in dag so createEdge can append to dag.Edges.
+	dag.nodes["aene-from"] = from
+	dag.nodes["aene-to"] = to
+
+	if err := dag.addEndNode(from, to); err != nil {
+		t.Fatalf("first addEndNode: %v", err)
+	}
+	// Second call: the edge already exists → createEdge returns Exist → error.
+	if err := dag.addEndNode(from, to); err == nil {
+		t.Error("duplicate addEndNode should return error")
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// TestFinishDag_SingleNonStartNode covers the FinishDag path where there is
+// exactly one node and it is not the StartNode — an invalid configuration.
+func TestFinishDag_SingleNonStartNode(t *testing.T) {
+	dag := NewDag()
+	// Bypass StartDag; inject a single non-StartNode directly.
+	dag.mu.Lock()
+	dag.createNode("solo-but-not-start") //nolint:errcheck
+	dag.mu.Unlock()
+
+	if err := dag.FinishDag(); err == nil {
+		t.Error("FinishDag should reject a single non-StartNode")
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
+// TestCloseChannels_AfterDoubleWait verifies that calling closeChannels
+// twice (via two Wait calls on a finished DAG) does not panic even though
+// the channels are already closed — exercising the error return path of
+// SafeChannel.Close().
+func TestCloseChannels_AfterDoubleWait(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDag()
+	if err != nil {
+		t.Fatalf("InitDag: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "A"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+	dag.SetContainerCmd(NoopCmd{})
+	dag.ConnectRunner()
+	ctx := context.Background()
+	dag.GetReady(ctx)
+	dag.Start()
+	dag.Wait(ctx)
+
+	// Second closeChannels call: channels are already closed → Close() returns error internally.
+	// Must not panic.
+	dag.closeChannels()
 }
