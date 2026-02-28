@@ -1421,11 +1421,11 @@ func TestDag_ConcurrencyStress(t *testing.T) {
 	)
 
 	cfg := DefaultDagConfig()
-	cfg.MaxChannelBuffer  = nodeCount*5 + 100 // generous headroom for burst
-	cfg.WorkerPoolSize    = nodeCount + 10     // one worker per node + buffer
-	cfg.MinChannelBuffer  = 5                  // 3 msgs per node max; 5 is safe
-	cfg.ExpectedNodeCount = nodeCount + 2      // +2 for start/end synthetic nodes
-	cfg.DefaultTimeout    = 30 * time.Second
+	cfg.MaxChannelBuffer = nodeCount*5 + 100 // generous headroom for burst
+	cfg.WorkerPoolSize = nodeCount + 10      // one worker per node + buffer
+	cfg.MinChannelBuffer = 5                 // 3 msgs per node max; 5 is safe
+	cfg.ExpectedNodeCount = nodeCount + 2    // +2 for start/end synthetic nodes
+	cfg.DefaultTimeout = 30 * time.Second
 
 	dag := buildStressDAG(t, nodeCount, cfg)
 	dag.SetContainerCmd(randomDelayRunner{maxMs: maxDelayMs})
@@ -1583,6 +1583,8 @@ func TestWait_ContextCancellation(t *testing.T) {
 // it receives a Failed channel signal and transitions Running→Failed.
 // Both outcomes are correct — the important invariant is that children never
 // report NodeStatusSucceeded when their parent has failed.
+//
+//nolint:gocognit,gocyclo // test covers topology setup, failure injection, signal propagation, and multi-node status assertion
 func TestDag_ParentFailurePropagation(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	Log.SetOutput(io.Discard)
@@ -1835,10 +1837,10 @@ func TestSetNodeRunners_Bulk(t *testing.T) {
 	}
 
 	runners := map[string]Runnable{
-		"A":          NoopCmd{},
-		"B":          NoopCmd{},
+		"A":           NoopCmd{},
+		"B":           NoopCmd{},
 		"nonexistent": NoopCmd{}, // not in DAG → missing
-		StartNode:    NoopCmd{}, // synthetic → skipped
+		StartNode:     NoopCmd{}, // synthetic → skipped
 	}
 	applied, missing, skipped := dag.SetNodeRunners(runners)
 
@@ -1907,7 +1909,8 @@ func TestAddEdgeIfNodesExist_MissingNode(t *testing.T) {
 		t.Fatalf("InitDag: %v", err)
 	}
 	// Add a real node so "from" resolves, but "to" is absent.
-	if err := dag.AddEdge(StartNode, "existing"); err != nil {
+	err = dag.AddEdge(StartNode, "existing")
+	if err != nil {
 		t.Fatalf("AddEdge: %v", err)
 	}
 
