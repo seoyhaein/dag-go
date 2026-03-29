@@ -397,6 +397,21 @@ func WithTimeout(timeout time.Duration) DagOption {
 	}
 }
 
+// WithDefaultTimeout sets the per-node preFlight wait deadline.
+// This is distinct from WithTimeout, which sets the overall DAG execution
+// timeout used in Wait().  WithDefaultTimeout controls how long each node's
+// preFlight phase waits for its parent nodes to complete.
+//
+// Pass 0 to disable the per-node deadline entirely: preFlight will then rely
+// solely on the caller's context deadline (the ctx passed to GetReady/Wait).
+// This is the correct setting for long-running pipelines where individual
+// stages can exceed the default 30 s.
+func WithDefaultTimeout(d time.Duration) DagOption {
+	return func(dag *Dag) {
+		dag.Config.DefaultTimeout = d
+	}
+}
+
 // WithChannelBuffers 채널 버퍼 설정 옵션을 반환
 //
 //nolint:unused // This function is intentionally left for future use.

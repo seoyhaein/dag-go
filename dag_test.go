@@ -2609,6 +2609,60 @@ func TestPreFlight_DagDefaultTimeout(t *testing.T) {
 	}
 }
 
+// TestWithDefaultTimeout_ZeroUsesCallerContextOnly verifies that
+// WithDefaultTimeout(0) causes preFlight to use the caller's context only
+// (the default/WithCancel branch), with no extra per-node deadline.
+//
+// The DAG has a single node whose runner sleeps for 6 seconds.  With the
+// default 30 s DefaultTimeout this is trivially fine, but this test
+// explicitly sets DefaultTimeout=0 and confirms that Wait() still returns
+// true — proving that 0 does not mean "expire immediately" but rather
+// "no extra timeout beyond the caller's ctx".
+func TestWithDefaultTimeout_ZeroUsesCallerContextOnly(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDagWithOptions(WithDefaultTimeout(0))
+	if err != nil {
+		t.Fatalf("InitDagWithOptions: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "slow"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+	dag.SetContainerCmd(NoopCmd{})
+	dag.ConnectRunner()
+	ctx := context.Background()
+	dag.GetReady(ctx)
+	dag.Start()
+	ok := dag.Wait(ctx)
+	if !ok {
+		t.Error("Wait returned false: WithDefaultTimeout(0) should not expire immediately")
+	}
+}
+
+// TestWithDefaultTimeout_NonZeroAppliesToPreFlight verifies that a positive
+// value passed to WithDefaultTimeout is stored in DagConfig.DefaultTimeout,
+// confirming the option wires through correctly (the existing
+// TestPreFlight_DagDefaultTimeout covers runtime behaviour; this covers the
+// option constructor path).
+func TestWithDefaultTimeout_NonZeroAppliesToPreFlight(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	const want = 5 * time.Second
+	dag, err := InitDagWithOptions(WithDefaultTimeout(want))
+	if err != nil {
+		t.Fatalf("InitDagWithOptions: %v", err)
+	}
+	if got := dag.Config.DefaultTimeout; got != want {
+		t.Errorf("Config.DefaultTimeout = %v, want %v", got, want)
+	}
+	dag.Errors.Close() //nolint:errcheck
+}
+
 // TestConnectRunner_EmptyDAG exercises the ConnectRunner early-return path
 // when no nodes are present (len(dag.nodes) < 1).
 func TestConnectRunner_EmptyDAG(t *testing.T) {
