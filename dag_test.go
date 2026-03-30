@@ -2579,10 +2579,10 @@ func TestAddEndNode_NilTo(t *testing.T) {
 	dag.Errors.Close() //nolint:errcheck
 }
 
-// TestPreFlight_DagDefaultTimeout exercises the parentDag.Config.DefaultTimeout > 0
-// branch in preFlight, ensuring the DAG-level timeout context is used when no
-// per-node timeout is configured.
-func TestPreFlight_DagDefaultTimeout(t *testing.T) {
+// TestInFlight_DagDefaultTimeout verifies that a positive DefaultTimeout is stored
+// and applied as a per-node execution timeout during inFlight. The node uses a
+// no-op runner that finishes instantly, so the 5 s budget is never exhausted.
+func TestInFlight_DagDefaultTimeout(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	Log.SetOutput(io.Discard)
 
@@ -2609,16 +2609,12 @@ func TestPreFlight_DagDefaultTimeout(t *testing.T) {
 	}
 }
 
-// TestWithDefaultTimeout_ZeroUsesCallerContextOnly verifies that
-// WithDefaultTimeout(0) causes preFlight to use the caller's context only
-// (the default/WithCancel branch), with no extra per-node deadline.
-//
-// The DAG has a single node whose runner sleeps for 6 seconds.  With the
-// default 30 s DefaultTimeout this is trivially fine, but this test
-// explicitly sets DefaultTimeout=0 and confirms that Wait() still returns
-// true — proving that 0 does not mean "expire immediately" but rather
-// "no extra timeout beyond the caller's ctx".
-func TestWithDefaultTimeout_ZeroUsesCallerContextOnly(t *testing.T) {
+// TestWithDefaultTimeout_ZeroMeansNoExecutionTimeout verifies that
+// WithDefaultTimeout(0) applies no implicit per-node execution timeout.
+// The node uses a no-op runner, and the test confirms Wait() returns true —
+// proving that 0 does not mean "expire immediately" but rather
+// "no implicit execution timeout; only the caller context applies".
+func TestWithDefaultTimeout_ZeroMeansNoExecutionTimeout(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	Log.SetOutput(io.Discard)
 
@@ -2643,12 +2639,11 @@ func TestWithDefaultTimeout_ZeroUsesCallerContextOnly(t *testing.T) {
 	}
 }
 
-// TestWithDefaultTimeout_NonZeroAppliesToPreFlight verifies that a positive
-// value passed to WithDefaultTimeout is stored in DagConfig.DefaultTimeout,
-// confirming the option wires through correctly (the existing
-// TestPreFlight_DagDefaultTimeout covers runtime behaviour; this covers the
-// option constructor path).
-func TestWithDefaultTimeout_NonZeroAppliesToPreFlight(t *testing.T) {
+// TestWithDefaultTimeout_NonZeroStoredInConfig verifies that a positive value
+// passed to WithDefaultTimeout is stored in DagConfig.DefaultTimeout, confirming
+// the option wires through correctly. Runtime behaviour (execution timeout applied
+// during inFlight) is covered by TestDefaultTimeout_AppliesDuringInFlightExecution.
+func TestWithDefaultTimeout_NonZeroStoredInConfig(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	Log.SetOutput(io.Discard)
 
@@ -2787,4 +2782,200 @@ func TestCloseChannels_AfterDoubleWait(t *testing.T) {
 	// Second closeChannels call: channels are already closed → Close() returns error internally.
 	// Must not panic.
 	dag.closeChannels()
+}
+
+// ── D-exec semantic tests ────────────────────────────────────────────────────
+//
+// These four tests together pin the new DefaultTimeout / Node.Timeout policy:
+//
+//   DefaultTimeout == 0  → no implicit per-node execution timeout
+//   DefaultTimeout  > 0  → bounds RunE; dep-wait never consumes this budget
+//   Node.Timeout         → per-node override (takes priority over DefaultTimeout)
+//
+// Dependency wait (preFlight) always uses the caller ctx only.
+
+// fixedDelayRunner sleeps for a fixed duration, honouring ctx cancellation.
+// Used to simulate controlled-latency work in execution-timeout tests.
+type fixedDelayRunner struct{ d time.Duration }
+
+func (r fixedDelayRunner) RunE(ctx context.Context, _ interface{}) error {
+	select {
+	case <-time.After(r.d):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// TestDefaultTimeout_ZeroMeansNoImplicitExecutionTimeout verifies that
+// DefaultTimeout == 0 does not impose any per-node execution deadline.
+// A node whose RunE takes longer than an arbitrary threshold still succeeds
+// because no execution timeout is active.
+func TestDefaultTimeout_ZeroMeansNoImplicitExecutionTimeout(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDagWithOptions(WithDefaultTimeout(0))
+	if err != nil {
+		t.Fatalf("InitDagWithOptions: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "work"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+	// Runner takes 100 ms — would time out if DefaultTimeout were non-zero and small.
+	dag.SetContainerCmd(fixedDelayRunner{d: 100 * time.Millisecond})
+	dag.ConnectRunner()
+	ctx := context.Background()
+	dag.GetReady(ctx)
+	dag.Start()
+	if !dag.Wait(ctx) {
+		t.Error("Wait returned false: DefaultTimeout=0 must not impose an execution deadline")
+	}
+}
+
+// TestDefaultTimeout_DoesNotApplyWhileWaitingForDependencies is the primary
+// regression test for the D-exec semantic change.
+//
+// Setup: A → B
+//   - DefaultTimeout = 150 ms (short execution budget)
+//   - Node A has a per-node Timeout of 500 ms so its own execution is not
+//     bounded by the short DefaultTimeout.
+//   - A's runner sleeps 200 ms (longer than DefaultTimeout but within A's budget).
+//   - B's runner sleeps 50 ms (within B's DefaultTimeout budget of 150 ms).
+//
+// Old behaviour: B's preFlight used DefaultTimeout=150 ms as dep-wait budget.
+//
+//	A takes 200 ms → B's dep-wait times out → B fails.
+//
+// New behaviour: B's preFlight uses caller ctx only (no budget consumed).
+//
+//	B waits 200 ms for A, then runs 50 ms within its 150 ms execution budget.
+//	Both A and B succeed.
+func TestDefaultTimeout_DoesNotApplyWhileWaitingForDependencies(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDagWithOptions(WithDefaultTimeout(150 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("InitDagWithOptions: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "A"); err != nil {
+		t.Fatalf("AddEdge StartNode→A: %v", err)
+	}
+	if err := dag.AddEdge("A", "B"); err != nil {
+		t.Fatalf("AddEdge A→B: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+
+	// Give node A its own execution budget so DefaultTimeout does not kill it.
+	nodeA := dag.nodes["A"]
+	nodeA.bTimeout = true
+	nodeA.Timeout = 500 * time.Millisecond
+
+	// A sleeps 200 ms (within A's 500 ms budget, longer than DefaultTimeout).
+	// B sleeps  50 ms (within B's DefaultTimeout budget of 150 ms).
+	if !dag.SetNodeRunner("A", fixedDelayRunner{d: 200 * time.Millisecond}) {
+		t.Fatal("SetNodeRunner A failed")
+	}
+	if !dag.SetNodeRunner("B", fixedDelayRunner{d: 50 * time.Millisecond}) {
+		t.Fatal("SetNodeRunner B failed")
+	}
+	dag.ConnectRunner()
+
+	ctx := context.Background()
+	dag.GetReady(ctx)
+	dag.Start()
+	if !dag.Wait(ctx) {
+		t.Error("Wait returned false: dep-wait must not consume B's execution budget")
+	}
+
+	if s := dag.nodes["B"].GetStatus(); s != NodeStatusSucceeded {
+		t.Errorf("node B status = %v, want NodeStatusSucceeded", s)
+	}
+}
+
+// TestDefaultTimeout_AppliesDuringInFlightExecution verifies that a positive
+// DefaultTimeout is enforced as an execution deadline for RunE.
+// The runner sleeps longer than DefaultTimeout and honours ctx cancellation,
+// so the node must fail with a timeout.
+func TestDefaultTimeout_AppliesDuringInFlightExecution(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDagWithOptions(WithDefaultTimeout(80 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("InitDagWithOptions: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "slow"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+	// Runner sleeps 300 ms — exceeds DefaultTimeout of 80 ms.
+	dag.SetContainerCmd(fixedDelayRunner{d: 300 * time.Millisecond})
+	dag.ConnectRunner()
+
+	ctx := context.Background()
+	dag.GetReady(ctx)
+	dag.Start()
+	// Wait must return false: the node's execution was cancelled by the timeout.
+	if dag.Wait(ctx) {
+		t.Error("Wait returned true: expected node to fail due to execution timeout")
+	}
+
+	if s := dag.nodes["slow"].GetStatus(); s != NodeStatusFailed {
+		t.Errorf("node 'slow' status = %v, want NodeStatusFailed", s)
+	}
+}
+
+// TestNodeTimeout_OverridesDefaultExecutionTimeout verifies that Node.Timeout
+// (with bTimeout=true) takes priority over Dag.Config.DefaultTimeout for the
+// inFlight execution budget.
+//
+// DefaultTimeout is set to 80 ms (short).  Node A has bTimeout=true and
+// Timeout=500 ms (long).  A's runner sleeps 200 ms — it would fail under
+// DefaultTimeout alone but succeeds under its own per-node timeout.
+func TestNodeTimeout_OverridesDefaultExecutionTimeout(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	dag, err := InitDagWithOptions(WithDefaultTimeout(80 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("InitDagWithOptions: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "A"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+
+	// Give node A a per-node execution budget of 500 ms — overrides DefaultTimeout.
+	nodeA := dag.nodes["A"]
+	nodeA.bTimeout = true
+	nodeA.Timeout = 500 * time.Millisecond
+
+	// Runner sleeps 200 ms: fails under DefaultTimeout (80 ms) but passes under
+	// Node.Timeout (500 ms).
+	if !dag.SetNodeRunner("A", fixedDelayRunner{d: 200 * time.Millisecond}) {
+		t.Fatal("SetNodeRunner A failed")
+	}
+	dag.ConnectRunner()
+
+	ctx := context.Background()
+	dag.GetReady(ctx)
+	dag.Start()
+	if !dag.Wait(ctx) {
+		t.Error("Wait returned false: Node.Timeout must override DefaultTimeout")
+	}
+
+	if s := dag.nodes["A"].GetStatus(); s != NodeStatusSucceeded {
+		t.Errorf("node A status = %v, want NodeStatusSucceeded", s)
+	}
 }

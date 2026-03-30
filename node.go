@@ -59,7 +59,7 @@ type Node struct {
 
 	// per-node timeout configuration
 	Timeout  time.Duration // effective only when bTimeout is true
-	bTimeout bool          // true → apply Timeout during preFlight
+	bTimeout bool          // true → apply Timeout during inFlight (execution phase)
 }
 
 // SetStatus sets the node's status under the write lock.
@@ -168,10 +168,9 @@ func (e *NodeError) Unwrap() error {
 }
 
 // preFlight waits for all parent channels to report a non-Failed status.
-// The timeout applied follows this priority:
-//  1. Node.Timeout   (when Node.bTimeout is true)
-//  2. Dag.Config.DefaultTimeout (when positive)
-//  3. No extra timeout — honour the caller's existing deadline.
+// The caller's ctx is used directly — no execution timeout is applied here.
+// Execution timeouts (DefaultTimeout / Node.Timeout) are applied by connectRunner
+// before inFlight, so that dependency wait never consumes the node's execution budget.
 //
 //nolint:gocognit,gocyclo // fan-in select over multiple parent channels; complexity is inherent to the concurrent coordination logic.
 func preFlight(ctx context.Context, n *Node) *printStatus {
@@ -179,25 +178,10 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 		return newPrintStatus(PreflightFailed, noNodeID)
 	}
 
-	// Determine effective timeout for this preFlight call.
-	var timeoutCtx context.Context
-	var cancel context.CancelFunc
-
-	switch {
-	case n.bTimeout && n.Timeout > 0:
-		// Per-node timeout takes highest priority.
-		timeoutCtx, cancel = context.WithTimeout(ctx, n.Timeout)
-	case n.parentDag != nil && n.parentDag.Config.DefaultTimeout > 0:
-		// Fall back to the DAG-level default timeout.
-		timeoutCtx, cancel = context.WithTimeout(ctx, n.parentDag.Config.DefaultTimeout)
-	default:
-		// No additional timeout; honour the caller's existing deadline / cancellation.
-		timeoutCtx, cancel = context.WithCancel(ctx)
-	}
-	defer cancel()
-
-	// Build an errgroup that limits concurrent goroutines waiting on parent channels.
-	eg, egCtx := errgroup.WithContext(timeoutCtx)
+	// Build an errgroup using the caller's context directly.
+	// No execution timeout is applied here — dependency wait must not consume
+	// the node's execution budget. See connectRunner for where timeouts are applied.
+	eg, egCtx := errgroup.WithContext(ctx)
 	//nolint:mnd // 10 is the fixed limit for concurrent goroutines; TODO: make configurable.
 	eg.SetLimit(10)
 

@@ -13,8 +13,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// TODO context 확인해야 함.
-
 // ==================== 상수 정의 ====================
 
 // Create, Exist, Fault are the result codes returned by createEdge.
@@ -73,9 +71,16 @@ type DagConfig struct {
 	// the node count instead (min of the two).  Default: 50.
 	WorkerPoolSize int
 
-	// DefaultTimeout is the preFlight wait deadline applied to every node that
-	// does not set its own Node.Timeout.  Zero means no extra timeout is added
-	// beyond the caller's context deadline.  Default: 30 s.
+	// DefaultTimeout is the implicit per-node execution timeout applied during
+	// inFlight (RunE). It limits how long each node's user-supplied work may run.
+	//
+	// Zero (the default) means no implicit per-node execution timeout is applied;
+	// only the caller's context deadline governs execution length.
+	// Per-node overrides are set via Node.Timeout (requires bTimeout=true).
+	//
+	// Dependency wait (preFlight) is never bounded by this value — it always
+	// uses the caller's context only, so upstream work never causes false-negative
+	// timeouts in downstream nodes.
 	DefaultTimeout time.Duration
 
 	// ErrorDrainTimeout is the maximum time collectErrors will wait to drain the
@@ -196,19 +201,24 @@ type Edge struct {
 // ==================== DAG 기본 및 옵션 함수 ====================
 
 // DefaultDagConfig returns a DagConfig populated with production-ready defaults:
-//   - MinChannelBuffer: 5
-//   - MaxChannelBuffer: 100
-//   - StatusBuffer:     10
-//   - WorkerPoolSize:   50
-//   - DefaultTimeout:   30 s
+//   - MinChannelBuffer:  5
+//   - MaxChannelBuffer:  100
+//   - StatusBuffer:      10
+//   - WorkerPoolSize:    50
+//   - DefaultTimeout:    0 (no implicit per-node execution timeout)
 //   - ErrorDrainTimeout: 5 s
+//
+// DefaultTimeout is intentionally 0: individual node execution time is not
+// bounded by default. Use WithDefaultTimeout or set Node.Timeout explicitly
+// when per-node execution limits are required. DAG-wide time limits should
+// be enforced via the caller context passed to GetReady and Wait.
 func DefaultDagConfig() DagConfig {
 	return DagConfig{
 		MinChannelBuffer:  5,
 		MaxChannelBuffer:  100,
 		StatusBuffer:      10,
 		WorkerPoolSize:    50,
-		DefaultTimeout:    30 * time.Second,
+		DefaultTimeout:    0,
 		ErrorDrainTimeout: 5 * time.Second,
 	}
 }
@@ -397,15 +407,22 @@ func WithTimeout(timeout time.Duration) DagOption {
 	}
 }
 
-// WithDefaultTimeout sets the per-node preFlight wait deadline.
-// This is distinct from WithTimeout, which sets the overall DAG execution
-// timeout used in Wait().  WithDefaultTimeout controls how long each node's
-// preFlight phase waits for its parent nodes to complete.
+// WithDefaultTimeout sets the implicit per-node execution timeout applied
+// during inFlight (RunE).  This is distinct from WithTimeout, which caps the
+// overall DAG run in Wait().
 //
-// Pass 0 to disable the per-node deadline entirely: preFlight will then rely
-// solely on the caller's context deadline (the ctx passed to GetReady/Wait).
-// This is the correct setting for long-running pipelines where individual
-// stages can exceed the default 30 s.
+// Semantics:
+//   - d == 0: no implicit per-node execution timeout (the default). Each
+//     node's RunE runs until the caller context expires or the node returns.
+//   - d  > 0: RunE is bounded by d. If RunE does not return within d, its
+//     context is cancelled and the node is marked failed.
+//
+// Dependency wait (preFlight) is never bounded by this value; it always
+// honours the caller context only.  This prevents long upstream execution
+// chains from causing false-negative timeouts in downstream nodes.
+//
+// Per-node overrides: set Node.Timeout + Node.bTimeout=true on individual
+// nodes; those take priority over this DAG-wide default.
 func WithDefaultTimeout(d time.Duration) DagOption {
 	return func(dag *Dag) {
 		dag.Config.DefaultTimeout = d
@@ -1298,7 +1315,7 @@ func DetectCycle(dag *Dag) bool {
 
 // connectRunner connects a runner function to a node.
 //
-//nolint:gocognit // three-phase flight state machine with CAS guards; splitting would obscure the node lifecycle
+//nolint:gocognit // three-phase flight state machine with execution-timeout resolution; splitting would obscure the node lifecycle
 func connectRunner(n *Node) {
 	n.runner = func(ctx context.Context, result *SafeChannel[*printStatus]) {
 		// sendResult delivers a copy of ps to the per-node result channel.
@@ -1328,7 +1345,9 @@ func connectRunner(n *Node) {
 			Log.Warnf("connectRunner: Pending→Running rejected for node %s (status=%v)", n.ID, n.GetStatus())
 		}
 
-		// preFlight phase
+		// preFlight phase — waits for all parent signals using the caller ctx only.
+		// No execution budget is consumed here: dependency wait must not reduce
+		// the time available for the node's own work (inFlight).
 		ps := preFlight(ctx, n)
 		sendResult(ps)
 		if ps.rStatus == PreflightFailed {
@@ -1341,8 +1360,28 @@ func connectRunner(n *Node) {
 		}
 		releasePrintStatus(ps)
 
-		// inFlight phase
-		ps = inFlight(ctx, n)
+		// Resolve execution context for inFlight.
+		// Timeout priority (highest first):
+		//   1. Node.Timeout  — when bTimeout=true and Timeout > 0
+		//   2. Dag.Config.DefaultTimeout — when positive
+		//   3. Caller ctx only — no additional deadline
+		//
+		// DefaultTimeout == 0 means no implicit per-node execution timeout is
+		// applied; DAG-wide limits are enforced via the caller context.
+		var execCtx context.Context
+		var execCancel context.CancelFunc
+		switch {
+		case n.bTimeout && n.Timeout > 0:
+			execCtx, execCancel = context.WithTimeout(ctx, n.Timeout)
+		case n.parentDag != nil && n.parentDag.Config.DefaultTimeout > 0:
+			execCtx, execCancel = context.WithTimeout(ctx, n.parentDag.Config.DefaultTimeout)
+		default:
+			execCtx, execCancel = context.WithCancel(ctx)
+		}
+		defer execCancel()
+
+		// inFlight phase — runs node-owned work (RunE) with the execution context.
+		ps = inFlight(execCtx, n)
 		sendResult(ps)
 		if ps.rStatus == InFlightFailed {
 			if ok := n.TransitionStatus(NodeStatusRunning, NodeStatusFailed); !ok {
