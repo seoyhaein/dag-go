@@ -2053,7 +2053,7 @@ func TestInitDagWithOptions(t *testing.T) {
 
 // TestDagOptions_ChannelBuffersAndWorkerPool verifies that WithChannelBuffers
 // and WithWorkerPool functional options correctly set the config fields on
-// a new DAG, exercising the nolint:unused option helpers.
+// a new DAG.
 func TestDagOptions_ChannelBuffersAndWorkerPool(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
@@ -2873,8 +2873,8 @@ func TestDefaultTimeout_DoesNotApplyWhileWaitingForDependencies(t *testing.T) {
 	}
 
 	// Give node A its own execution budget so DefaultTimeout does not kill it.
+	// Node.Timeout > 0 is sufficient — no separate flag needed.
 	nodeA := dag.nodes["A"]
-	nodeA.bTimeout = true
 	nodeA.Timeout = 500 * time.Millisecond
 
 	// A sleeps 200 ms (within A's 500 ms budget, longer than DefaultTimeout).
@@ -2934,13 +2934,13 @@ func TestDefaultTimeout_AppliesDuringInFlightExecution(t *testing.T) {
 	}
 }
 
-// TestNodeTimeout_OverridesDefaultExecutionTimeout verifies that Node.Timeout
-// (with bTimeout=true) takes priority over Dag.Config.DefaultTimeout for the
-// inFlight execution budget.
+// TestNodeTimeout_OverridesDefaultExecutionTimeout verifies that Node.Timeout > 0
+// takes priority over Dag.Config.DefaultTimeout for the inFlight execution budget.
+// No separate bTimeout flag is required: Timeout > 0 is the sole condition.
 //
-// DefaultTimeout is set to 80 ms (short).  Node A has bTimeout=true and
-// Timeout=500 ms (long).  A's runner sleeps 200 ms — it would fail under
-// DefaultTimeout alone but succeeds under its own per-node timeout.
+// DefaultTimeout is set to 80 ms (short).  Node A has Timeout=500 ms (long).
+// A's runner sleeps 200 ms — it would fail under DefaultTimeout alone but
+// succeeds under its own per-node timeout.
 func TestNodeTimeout_OverridesDefaultExecutionTimeout(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	Log.SetOutput(io.Discard)
@@ -2956,9 +2956,8 @@ func TestNodeTimeout_OverridesDefaultExecutionTimeout(t *testing.T) {
 		t.Fatalf("FinishDag: %v", err)
 	}
 
-	// Give node A a per-node execution budget of 500 ms — overrides DefaultTimeout.
+	// Give node A a per-node execution budget — just set Timeout, no flag needed.
 	nodeA := dag.nodes["A"]
-	nodeA.bTimeout = true
 	nodeA.Timeout = 500 * time.Millisecond
 
 	// Runner sleeps 200 ms: fails under DefaultTimeout (80 ms) but passes under
@@ -2977,5 +2976,76 @@ func TestNodeTimeout_OverridesDefaultExecutionTimeout(t *testing.T) {
 
 	if s := dag.nodes["A"].GetStatus(); s != NodeStatusSucceeded {
 		t.Errorf("node A status = %v, want NodeStatusSucceeded", s)
+	}
+}
+
+// ── post-D-exec cleanup / hardening tests ────────────────────────────────────
+
+// TestNodeTimeout_WorksWithoutBTimeoutFlag verifies that setting Node.Timeout > 0
+// alone (no separate bTimeout flag) is sufficient to override the DAG-wide
+// DefaultTimeout.  This pins the simplified bTimeout-removal semantic.
+func TestNodeTimeout_WorksWithoutBTimeoutFlag(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	Log.SetOutput(io.Discard)
+
+	// DAG-wide budget is 80 ms — too short for A's 200 ms runner.
+	dag, err := InitDagWithOptions(WithDefaultTimeout(80 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("InitDagWithOptions: %v", err)
+	}
+	if err := dag.AddEdge(StartNode, "A"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if err := dag.FinishDag(); err != nil {
+		t.Fatalf("FinishDag: %v", err)
+	}
+
+	// Set only Node.Timeout — no bTimeout flag required after the simplification.
+	dag.nodes["A"].Timeout = 500 * time.Millisecond
+
+	if !dag.SetNodeRunner("A", fixedDelayRunner{d: 200 * time.Millisecond}) {
+		t.Fatal("SetNodeRunner A failed")
+	}
+	dag.ConnectRunner()
+
+	ctx := context.Background()
+	dag.GetReady(ctx)
+	dag.Start()
+	if !dag.Wait(ctx) {
+		t.Error("Wait returned false: Node.Timeout alone should override DefaultTimeout")
+	}
+	if s := dag.nodes["A"].GetStatus(); s != NodeStatusSucceeded {
+		t.Errorf("node A status = %v, want NodeStatusSucceeded", s)
+	}
+}
+
+// TestCollectErrors_DrainOnChannelClose verifies that collectErrors returns
+// all pending errors and exits cleanly when the Errors channel is closed,
+// without waiting for the drain timeout.  This pins the non-polling channel
+// drain behaviour introduced in the collectErrors cleanup.
+func TestCollectErrors_DrainOnChannelClose(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	cfg := DefaultDagConfig()
+	cfg.ErrorDrainTimeout = 5 * time.Second // long timeout — must NOT be hit
+	dag := NewDagWithConfig(cfg)
+
+	// Send two errors into the channel before closing it.
+	err1 := fmt.Errorf("err-one")
+	err2 := fmt.Errorf("err-two")
+	dag.Errors.SendBlocking(context.Background(), err1) //nolint:errcheck
+	dag.Errors.SendBlocking(context.Background(), err2) //nolint:errcheck
+	dag.Errors.Close()                                  //nolint:errcheck
+
+	start := time.Now()
+	errs := dag.collectErrors(context.Background())
+	elapsed := time.Since(start)
+
+	if len(errs) != 2 {
+		t.Errorf("expected 2 errors, got %d: %v", len(errs), errs)
+	}
+	// Must return well before the 5 s drain timeout — channel close is immediate.
+	if elapsed > time.Second {
+		t.Errorf("collectErrors took too long after channel close: %v", elapsed)
 	}
 }

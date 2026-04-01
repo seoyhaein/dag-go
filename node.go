@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"runtime/pprof"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -57,9 +56,11 @@ type Node struct {
 	succeed bool
 	mu      sync.RWMutex // guards status and succeed
 
-	// per-node timeout configuration
-	Timeout  time.Duration // effective only when bTimeout is true
-	bTimeout bool          // true → apply Timeout during inFlight (execution phase)
+	// Timeout is the per-node inFlight execution budget.
+	// When Timeout > 0, it overrides Dag.Config.DefaultTimeout for this node.
+	// Zero means "use DefaultTimeout or, if that is also zero, the caller context".
+	// Set this field directly before ConnectRunner is called.
+	Timeout time.Duration
 }
 
 // SetStatus sets the node's status under the write lock.
@@ -336,46 +337,6 @@ func (n *Node) notifyChildren(ctx context.Context, st runningStatus) {
 			Log.Warnf("notifyChildren: signal delivery from node %s interrupted: %v", n.ID, ctx.Err())
 		}
 	}
-}
-
-// checkVisit returns true when every entry in the map is true.
-//
-//nolint:unused // This function is intentionally left for future use.
-func checkVisit(visit map[string]bool) bool {
-	for _, v := range visit {
-		if !v {
-			return false
-		}
-	}
-	return true
-}
-
-// getNode returns the Node with the given id from the map, or nil.
-//
-//nolint:unused // This function is intentionally left for future use.
-func getNode(s string, ns map[string]*Node) *Node {
-	if strings.TrimSpace(s) == "" {
-		return nil
-	}
-	if len(ns) == 0 {
-		return nil
-	}
-	return ns[s]
-}
-
-// getNextNode pops and returns the first child node of n.
-//
-//nolint:unused // This function is intentionally left for future use.
-func getNextNode(n *Node) *Node {
-	if n == nil {
-		return nil
-	}
-	if len(n.children) < 1 {
-		return nil
-	}
-	ch := n.children[0]
-	n.children = append(n.children[:0], n.children[1:]...)
-	return ch
 }
 
 // statusPool is a sync.Pool for printStatus objects to reduce allocations.
