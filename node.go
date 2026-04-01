@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/seoyhaein/dag-go/debugonly"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -173,6 +172,12 @@ func (e *NodeError) Unwrap() error {
 // Execution timeouts (DefaultTimeout / Node.Timeout) are applied by connectRunner
 // before inFlight, so that dependency wait never consumes the node's execution budget.
 //
+// All parent receivers are started concurrently without a goroutine limit.
+// preFlight is a fan-in wait stage: its contract is to attach a receiver to every
+// parent channel immediately.  Limiting concurrency here would leave some parent
+// channels without a receiver, creating backpressure against postFlight even when
+// the channel is buffered.  Fan-in policy limits belong at the DAG validation layer.
+//
 //nolint:gocognit,gocyclo // fan-in select over multiple parent channels; complexity is inherent to the concurrent coordination logic.
 func preFlight(ctx context.Context, n *Node) *printStatus {
 	if n == nil {
@@ -183,34 +188,15 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 	// No execution timeout is applied here — dependency wait must not consume
 	// the node's execution budget. See connectRunner for where timeouts are applied.
 	eg, egCtx := errgroup.WithContext(ctx)
-	//nolint:mnd // 10 is the fixed limit for concurrent goroutines; TODO: make configurable.
-	eg.SetLimit(10)
 
-	i := len(n.parentVertex)
-
-	for j := 0; j < i; j++ { //nolint:intrange
-		k := j // capture loop variable
-		sc := n.parentVertex[k]
+	for k, sc := range n.parentVertex {
 		if sc == nil {
 			Log.Fatalf("preFlight: n.parentVertex[%d] is nil for node %s", k, n.ID)
 		}
 		eg.Go(func() error {
-			nodeID, chIdx := n.ID, k
-			lbl := pprof.Labels(
-				"phase", "preFlight",
-				"nodeId", nodeID,
-				"channelIndex", strconv.Itoa(chIdx),
-			)
-			pprof.SetGoroutineLabels(pprof.WithLabels(egCtx, lbl))
-
-			// Debug breakpoints (compiled away in production via build tag).
-			if nodeID == "C" {
-				debugonly.BreakHere()
-			}
-			if nodeID == "node1" && chIdx == 2 {
-				debugonly.BreakHere()
-			}
-
+			pprof.SetGoroutineLabels(pprof.WithLabels(egCtx,
+				pprof.Labels("phase", "preFlight", "nodeId", n.ID, "channelIndex", strconv.Itoa(k)),
+			))
 			select {
 			case result := <-sc.GetChannel():
 				if result == Failed {
