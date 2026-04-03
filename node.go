@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"runtime/pprof"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/seoyhaein/dag-go/debugonly"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -57,9 +55,11 @@ type Node struct {
 	succeed bool
 	mu      sync.RWMutex // guards status and succeed
 
-	// per-node timeout configuration
-	Timeout  time.Duration // effective only when bTimeout is true
-	bTimeout bool          // true → apply Timeout during preFlight
+	// Timeout is the per-node inFlight execution budget.
+	// When Timeout > 0, it overrides Dag.Config.DefaultTimeout for this node.
+	// Zero means "use DefaultTimeout or, if that is also zero, the caller context".
+	// Set this field directly before ConnectRunner is called.
+	Timeout time.Duration
 }
 
 // SetStatus sets the node's status under the write lock.
@@ -168,10 +168,15 @@ func (e *NodeError) Unwrap() error {
 }
 
 // preFlight waits for all parent channels to report a non-Failed status.
-// The timeout applied follows this priority:
-//  1. Node.Timeout   (when Node.bTimeout is true)
-//  2. Dag.Config.DefaultTimeout (when positive)
-//  3. No extra timeout — honour the caller's existing deadline.
+// The caller's ctx is used directly — no execution timeout is applied here.
+// Execution timeouts (DefaultTimeout / Node.Timeout) are applied by connectRunner
+// before inFlight, so that dependency wait never consumes the node's execution budget.
+//
+// All parent receivers are started concurrently without a goroutine limit.
+// preFlight is a fan-in wait stage: its contract is to attach a receiver to every
+// parent channel immediately.  Limiting concurrency here would leave some parent
+// channels without a receiver, creating backpressure against postFlight even when
+// the channel is buffered.  Fan-in policy limits belong at the DAG validation layer.
 //
 //nolint:gocognit,gocyclo // fan-in select over multiple parent channels; complexity is inherent to the concurrent coordination logic.
 func preFlight(ctx context.Context, n *Node) *printStatus {
@@ -179,53 +184,19 @@ func preFlight(ctx context.Context, n *Node) *printStatus {
 		return newPrintStatus(PreflightFailed, noNodeID)
 	}
 
-	// Determine effective timeout for this preFlight call.
-	var timeoutCtx context.Context
-	var cancel context.CancelFunc
+	// Build an errgroup using the caller's context directly.
+	// No execution timeout is applied here — dependency wait must not consume
+	// the node's execution budget. See connectRunner for where timeouts are applied.
+	eg, egCtx := errgroup.WithContext(ctx)
 
-	switch {
-	case n.bTimeout && n.Timeout > 0:
-		// Per-node timeout takes highest priority.
-		timeoutCtx, cancel = context.WithTimeout(ctx, n.Timeout)
-	case n.parentDag != nil && n.parentDag.Config.DefaultTimeout > 0:
-		// Fall back to the DAG-level default timeout.
-		timeoutCtx, cancel = context.WithTimeout(ctx, n.parentDag.Config.DefaultTimeout)
-	default:
-		// No additional timeout; honour the caller's existing deadline / cancellation.
-		timeoutCtx, cancel = context.WithCancel(ctx)
-	}
-	defer cancel()
-
-	// Build an errgroup that limits concurrent goroutines waiting on parent channels.
-	eg, egCtx := errgroup.WithContext(timeoutCtx)
-	//nolint:mnd // 10 is the fixed limit for concurrent goroutines; TODO: make configurable.
-	eg.SetLimit(10)
-
-	i := len(n.parentVertex)
-
-	for j := 0; j < i; j++ { //nolint:intrange
-		k := j // capture loop variable
-		sc := n.parentVertex[k]
+	for k, sc := range n.parentVertex {
 		if sc == nil {
 			Log.Fatalf("preFlight: n.parentVertex[%d] is nil for node %s", k, n.ID)
 		}
 		eg.Go(func() error {
-			nodeID, chIdx := n.ID, k
-			lbl := pprof.Labels(
-				"phase", "preFlight",
-				"nodeId", nodeID,
-				"channelIndex", strconv.Itoa(chIdx),
-			)
-			pprof.SetGoroutineLabels(pprof.WithLabels(egCtx, lbl))
-
-			// Debug breakpoints (compiled away in production via build tag).
-			if nodeID == "C" {
-				debugonly.BreakHere()
-			}
-			if nodeID == "node1" && chIdx == 2 {
-				debugonly.BreakHere()
-			}
-
+			pprof.SetGoroutineLabels(pprof.WithLabels(egCtx,
+				pprof.Labels("phase", "preFlight", "nodeId", n.ID, "channelIndex", strconv.Itoa(k)),
+			))
 			select {
 			case result := <-sc.GetChannel():
 				if result == Failed {
@@ -352,46 +323,6 @@ func (n *Node) notifyChildren(ctx context.Context, st runningStatus) {
 			Log.Warnf("notifyChildren: signal delivery from node %s interrupted: %v", n.ID, ctx.Err())
 		}
 	}
-}
-
-// checkVisit returns true when every entry in the map is true.
-//
-//nolint:unused // This function is intentionally left for future use.
-func checkVisit(visit map[string]bool) bool {
-	for _, v := range visit {
-		if !v {
-			return false
-		}
-	}
-	return true
-}
-
-// getNode returns the Node with the given id from the map, or nil.
-//
-//nolint:unused // This function is intentionally left for future use.
-func getNode(s string, ns map[string]*Node) *Node {
-	if strings.TrimSpace(s) == "" {
-		return nil
-	}
-	if len(ns) == 0 {
-		return nil
-	}
-	return ns[s]
-}
-
-// getNextNode pops and returns the first child node of n.
-//
-//nolint:unused // This function is intentionally left for future use.
-func getNextNode(n *Node) *Node {
-	if n == nil {
-		return nil
-	}
-	if len(n.children) < 1 {
-		return nil
-	}
-	ch := n.children[0]
-	n.children = append(n.children[:0], n.children[1:]...)
-	return ch
 }
 
 // statusPool is a sync.Pool for printStatus objects to reduce allocations.

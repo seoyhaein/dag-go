@@ -13,8 +13,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// TODO context 확인해야 함.
-
 // ==================== 상수 정의 ====================
 
 // Create, Exist, Fault are the result codes returned by createEdge.
@@ -73,9 +71,16 @@ type DagConfig struct {
 	// the node count instead (min of the two).  Default: 50.
 	WorkerPoolSize int
 
-	// DefaultTimeout is the preFlight wait deadline applied to every node that
-	// does not set its own Node.Timeout.  Zero means no extra timeout is added
-	// beyond the caller's context deadline.  Default: 30 s.
+	// DefaultTimeout is the implicit per-node execution timeout applied during
+	// inFlight (RunE). It limits how long each node's user-supplied work may run.
+	//
+	// Zero (the default) means no implicit per-node execution timeout is applied;
+	// only the caller's context deadline governs execution length.
+	// Per-node overrides are set via Node.Timeout (when Timeout > 0).
+	//
+	// Dependency wait (preFlight) is never bounded by this value — it always
+	// uses the caller's context only, so upstream work never causes false-negative
+	// timeouts in downstream nodes.
 	DefaultTimeout time.Duration
 
 	// ErrorDrainTimeout is the maximum time collectErrors will wait to drain the
@@ -161,6 +166,27 @@ type Dag struct {
 	// The channel is recreated by Reset so it is valid for the next run.
 	Errors *SafeChannel[error]
 
+	// ── Timeout policy ──────────────────────────────────────────────────────
+	//
+	// dag-go has four timeout layers, applied in the following order of scope:
+	//
+	//  1. caller ctx         — outermost hard cap; passed to GetReady and Wait.
+	//                          All phases (preFlight, inFlight, postFlight) respect it.
+	//
+	//  2. Dag.Timeout        — Wait-level deadline; set via WithTimeout.
+	//                          Caps the entire dag.Wait call when bTimeout is true.
+	//
+	//  3. DagConfig.DefaultTimeout — implicit per-node execution timeout.
+	//                          Applied to inFlight (RunE) only; zero = no implicit limit.
+	//                          Dependency wait (preFlight) never consumes this budget.
+	//
+	//  4. Node.Timeout       — explicit per-node execution override.
+	//                          When Node.Timeout > 0 it takes priority over DefaultTimeout.
+	//
+	// Key invariant: dependency wait (preFlight) always uses the caller ctx only.
+	// Execution timeouts are applied by connectRunner immediately before inFlight.
+	// ────────────────────────────────────────────────────────────────────────
+
 	// Timeout is the DAG-level execution deadline applied when bTimeout is true.
 	// Set via WithTimeout or by assigning directly before GetReady.
 	Timeout  time.Duration
@@ -196,19 +222,24 @@ type Edge struct {
 // ==================== DAG 기본 및 옵션 함수 ====================
 
 // DefaultDagConfig returns a DagConfig populated with production-ready defaults:
-//   - MinChannelBuffer: 5
-//   - MaxChannelBuffer: 100
-//   - StatusBuffer:     10
-//   - WorkerPoolSize:   50
-//   - DefaultTimeout:   30 s
+//   - MinChannelBuffer:  5
+//   - MaxChannelBuffer:  100
+//   - StatusBuffer:      10
+//   - WorkerPoolSize:    50
+//   - DefaultTimeout:    0 (no implicit per-node execution timeout)
 //   - ErrorDrainTimeout: 5 s
+//
+// DefaultTimeout is intentionally 0: individual node execution time is not
+// bounded by default. Use WithDefaultTimeout or set Node.Timeout explicitly
+// when per-node execution limits are required. DAG-wide time limits should
+// be enforced via the caller context passed to GetReady and Wait.
 func DefaultDagConfig() DagConfig {
 	return DagConfig{
 		MinChannelBuffer:  5,
 		MaxChannelBuffer:  100,
 		StatusBuffer:      10,
 		WorkerPoolSize:    50,
-		DefaultTimeout:    30 * time.Second,
+		DefaultTimeout:    0,
 		ErrorDrainTimeout: 5 * time.Second,
 	}
 }
@@ -376,9 +407,9 @@ func (dag *Dag) SetNodeRunners(m map[string]Runnable) (applied int, missing, ski
 	return applied, missing, skipped
 }
 
-// InitDagWithOptions creates and initializes a new DAG with options.
-//
-//nolint:unused // This function is intentionally left for future use.
+// InitDagWithOptions creates and initialises a new DAG, applying the supplied
+// functional options before adding the synthetic start node.  It is the
+// option-friendly equivalent of InitDag.
 func InitDagWithOptions(options ...DagOption) (*Dag, error) {
 	dag := NewDagWithOptions(options...)
 	if dag == nil {
@@ -387,9 +418,9 @@ func InitDagWithOptions(options ...DagOption) (*Dag, error) {
 	return dag.StartDag()
 }
 
-// WithTimeout 타임아웃 설정 옵션을 반환
-//
-//nolint:unused // This function is intentionally left for future use.
+// WithTimeout sets the DAG-level execution deadline used by Wait.
+// This is distinct from WithDefaultTimeout, which bounds individual node
+// execution (inFlight).  Pass 0 or omit to rely on the caller context only.
 func WithTimeout(timeout time.Duration) DagOption {
 	return func(dag *Dag) {
 		dag.Timeout = timeout
@@ -397,9 +428,30 @@ func WithTimeout(timeout time.Duration) DagOption {
 	}
 }
 
-// WithChannelBuffers 채널 버퍼 설정 옵션을 반환
+// WithDefaultTimeout sets the implicit per-node execution timeout applied
+// during inFlight (RunE).  This is distinct from WithTimeout, which caps the
+// overall DAG run in Wait().
 //
-//nolint:unused // This function is intentionally left for future use.
+// Semantics:
+//   - d == 0: no implicit per-node execution timeout (the default). Each
+//     node's RunE runs until the caller context expires or the node returns.
+//   - d  > 0: RunE is bounded by d. If RunE does not return within d, its
+//     context is cancelled and the node is marked failed.
+//
+// Dependency wait (preFlight) is never bounded by this value; it always
+// honours the caller context only.  This prevents long upstream execution
+// chains from causing false-negative timeouts in downstream nodes.
+//
+// Per-node overrides: set Node.Timeout > 0 on individual nodes;
+// that takes priority over this DAG-wide default.
+func WithDefaultTimeout(d time.Duration) DagOption {
+	return func(dag *Dag) {
+		dag.Config.DefaultTimeout = d
+	}
+}
+
+// WithChannelBuffers sets the channel buffer sizes used for edge signalling and
+// result aggregation.  Larger buffers reduce back-pressure in high-fan-out DAGs.
 func WithChannelBuffers(minBuffer, maxBuffer, statusBuffer int) DagOption {
 	return func(dag *Dag) {
 		dag.Config.MinChannelBuffer = minBuffer
@@ -408,9 +460,8 @@ func WithChannelBuffers(minBuffer, maxBuffer, statusBuffer int) DagOption {
 	}
 }
 
-// WithWorkerPool 워커 풀 설정 옵션을 반환
-//
-//nolint:unused // This function is intentionally left for future use.
+// WithWorkerPool sets the maximum number of concurrent node-execution goroutines.
+// If the DAG has fewer nodes than size, the pool is sized to the node count instead.
 func WithWorkerPool(size int) DagOption {
 	return func(dag *Dag) {
 		dag.Config.WorkerPoolSize = size
@@ -506,6 +557,10 @@ func (dag *Dag) reportError(err error) {
 
 // collectErrors drains the error channel until it is empty, or until
 // DagConfig.ErrorDrainTimeout (default 5 s) or ctx fires — whichever is first.
+//
+// The implementation blocks on channel receive without polling: it returns as
+// soon as the Errors channel is closed (all errors have been flushed by
+// closeChannels), the drain timeout fires, or ctx is cancelled.
 func (dag *Dag) collectErrors(ctx context.Context) []error {
 	var errs []error
 
@@ -519,25 +574,16 @@ func (dag *Dag) collectErrors(ctx context.Context) []error {
 
 	for {
 		select {
-		case err := <-ch:
+		case err, ok := <-ch:
+			if !ok {
+				// Errors channel closed — all errors have been collected.
+				return errs
+			}
 			errs = append(errs, err)
 		case <-timeout:
 			return errs
 		case <-ctx.Done():
 			return errs
-		default:
-			if len(errs) > 0 {
-				// Wait briefly for any in-flight errors before declaring done.
-				select {
-				case err := <-ch:
-					errs = append(errs, err)
-				case <-time.After(100 * time.Millisecond): //nolint:mnd
-					return errs
-				}
-			} else {
-				//nolint:mnd // short poll sleep; TODO: replace with proper drain helper.
-				time.Sleep(10 * time.Millisecond)
-			}
 		}
 	}
 }
@@ -605,9 +651,8 @@ func (dag *Dag) closeChannels() {
 	}
 }
 
-// getSafeVertex returns the channel for the specified parent and child nodes.
-//
-//nolint:unused // This function is intentionally left for future use.
+// getSafeVertex returns the SafeChannel for the edge between parentID and childID,
+// or nil if no such edge exists.
 func (dag *Dag) getSafeVertex(parentID, childID string) *SafeChannel[runningStatus] {
 	for _, v := range dag.Edges {
 		if v.parentID == parentID && v.childID == childID {
@@ -703,7 +748,6 @@ func (dag *Dag) createNodeWithTimeOut(id string, ti time.Duration) *Node {
 	// 실행 시점 반영 기본: nil 저장
 	node.runnerStore(nil)
 
-	node.bTimeout = true
 	node.Timeout = ti
 	node.parentDag = dag
 	dag.nodes[id] = node
@@ -908,7 +952,9 @@ func (dag *Dag) FinishDag() error {
 	if dag.EndNode == nil {
 		return logErr(fmt.Errorf("failed to create end node"))
 	}
-	// TODO 일단 여기서 무조건 성공을 넣어 버리는데 end 노드에서 향후 리소스 초기화 과정을 거쳐야 하기때문에 이 부분은 수정해줘야 한다.
+	// TODO(endnode-cleanup): EndNode is unconditionally marked succeeded.
+	// If a future runner type needs to release resources at DAG completion,
+	// a cleanup hook should be invoked here before SetSucceed.
 	dag.EndNode.SetSucceed(true)
 
 	// 각 노드에 대해 검증 및 종료 노드로의 연결 작업 수행
@@ -1019,26 +1065,6 @@ func (dag *Dag) Reset() {
 	dag.nodeResult = nil
 	dag.workerPool = nil
 	dag.errLogs = nil
-}
-
-// visitReset resets the visited status of all nodes.
-//
-//nolint:unused // This function is intentionally left for future use.
-func (dag *Dag) visitReset() map[string]bool {
-	dag.mu.RLock()
-	defer dag.mu.RUnlock()
-
-	size := len(dag.nodes)
-	if size <= 0 {
-		return nil
-	}
-
-	visited := make(map[string]bool, len(dag.nodes))
-
-	for k := range dag.nodes {
-		visited[k] = false
-	}
-	return visited
 }
 
 // ConnectRunner attaches a runner closure (the three-phase preFlight / inFlight /
@@ -1283,7 +1309,7 @@ func DetectCycle(dag *Dag) bool {
 
 // connectRunner connects a runner function to a node.
 //
-//nolint:gocognit // three-phase flight state machine with CAS guards; splitting would obscure the node lifecycle
+//nolint:gocognit // three-phase flight state machine with execution-timeout resolution; splitting would obscure the node lifecycle
 func connectRunner(n *Node) {
 	n.runner = func(ctx context.Context, result *SafeChannel[*printStatus]) {
 		// sendResult delivers a copy of ps to the per-node result channel.
@@ -1313,7 +1339,9 @@ func connectRunner(n *Node) {
 			Log.Warnf("connectRunner: Pending→Running rejected for node %s (status=%v)", n.ID, n.GetStatus())
 		}
 
-		// preFlight phase
+		// preFlight phase — waits for all parent signals using the caller ctx only.
+		// No execution budget is consumed here: dependency wait must not reduce
+		// the time available for the node's own work (inFlight).
 		ps := preFlight(ctx, n)
 		sendResult(ps)
 		if ps.rStatus == PreflightFailed {
@@ -1326,8 +1354,28 @@ func connectRunner(n *Node) {
 		}
 		releasePrintStatus(ps)
 
-		// inFlight phase
-		ps = inFlight(ctx, n)
+		// Resolve execution context for inFlight.
+		// Timeout priority (highest first):
+		//   1. Node.Timeout  — when Timeout > 0 (explicit per-node override)
+		//   2. Dag.Config.DefaultTimeout — when positive (implicit DAG-wide default)
+		//   3. Caller ctx only — no additional deadline
+		//
+		// DefaultTimeout == 0 means no implicit per-node execution timeout is
+		// applied; DAG-wide limits are enforced via the caller context.
+		var execCtx context.Context
+		var execCancel context.CancelFunc
+		switch {
+		case n.Timeout > 0:
+			execCtx, execCancel = context.WithTimeout(ctx, n.Timeout)
+		case n.parentDag != nil && n.parentDag.Config.DefaultTimeout > 0:
+			execCtx, execCancel = context.WithTimeout(ctx, n.parentDag.Config.DefaultTimeout)
+		default:
+			execCtx, execCancel = context.WithCancel(ctx)
+		}
+		defer execCancel()
+
+		// inFlight phase — runs node-owned work (RunE) with the execution context.
+		ps = inFlight(execCtx, n)
 		sendResult(ps)
 		if ps.rStatus == InFlightFailed {
 			if ok := n.TransitionStatus(NodeStatusRunning, NodeStatusFailed); !ok {
@@ -1353,18 +1401,6 @@ func connectRunner(n *Node) {
 		}
 		releasePrintStatus(ps)
 	}
-}
-
-// insertSafe inserts a value into a slice at the specified index. 지금은 사용하지 않지만 지우지 말것.
-//
-//nolint:unused // This function is intentionally left for future use.
-func insertSafe(a []*SafeChannel[*printStatus], index int, value *SafeChannel[*printStatus]) []*SafeChannel[*printStatus] {
-	if len(a) == index { // 빈 슬라이스이거나 마지막 요소 뒤에 삽입하는 경우
-		return append(a, value)
-	}
-	a = append(a[:index+1], a[index:]...)
-	a[index] = value
-	return a
 }
 
 // merge merges all status channels using fan-in pattern.

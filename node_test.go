@@ -341,6 +341,67 @@ func TestTransitionStatus_ConcurrentFullLifecycle(t *testing.T) {
 	}
 }
 
+// TestPreFlight_MoreThan10Parents verifies that preFlight handles more than 10
+// parent channels without stalling. This is the core regression test for the
+// preFlight semantics restoration: removing eg.SetLimit(10) means all receivers
+// attach immediately regardless of parent count. With the old limit, parents
+// beyond the 10th had no receiver goroutine yet, creating backpressure risk
+// against postFlight's SendBlocking.
+func TestPreFlight_MoreThan10Parents(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	ctx := context.Background()
+
+	const numParents = 15 // exceeds the former SetLimit(10) boundary
+	node := &Node{ID: "node_15parents"}
+	node.parentVertex = createParentChannels(numParents, Succeed)
+
+	ps := preFlight(ctx, node)
+	if ps.rStatus != Preflight {
+		t.Errorf("expected Preflight, got %v (preFlight must not stall with >10 parents)", ps.rStatus)
+	}
+	if !node.IsSucceed() {
+		t.Error("expected node.succeed = true with all parents succeeding")
+	}
+}
+
+// TestPreFlight_FailedParent_CancelsOtherGoroutines verifies that when one parent
+// sends Failed, the errgroup context (egCtx) is cancelled and the goroutines
+// waiting on the remaining parent channels exit promptly via egCtx.Done().
+// This confirms the cancel-propagation path works correctly after SetLimit removal.
+func TestPreFlight_FailedParent_CancelsOtherGoroutines(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	ctx := context.Background()
+
+	node := &Node{ID: "node_cancel_prop"}
+
+	// failCh sends Failed immediately.
+	failCh := NewSafeChannelGen[runningStatus](1)
+	if !failCh.Send(Failed) {
+		t.Fatal("could not pre-load Failed into failCh")
+	}
+	// blockCh1 and blockCh2 never send — their goroutines must exit via egCtx.Done().
+	blockCh1 := NewSafeChannelGen[runningStatus](1)
+	blockCh2 := NewSafeChannelGen[runningStatus](1)
+
+	node.parentVertex = []*SafeChannel[runningStatus]{failCh, blockCh1, blockCh2}
+
+	start := time.Now()
+	ps := preFlight(ctx, node)
+	elapsed := time.Since(start)
+
+	if ps.rStatus != PreflightFailed {
+		t.Errorf("expected PreflightFailed, got %v", ps.rStatus)
+	}
+	if node.IsSucceed() {
+		t.Error("expected node.succeed = false after parent failure")
+	}
+	// Must return promptly: egCtx cancellation must unblock the two waiting goroutines
+	// without requiring blockCh1/blockCh2 to send.
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("preFlight took too long after Failed signal (%v); egCtx cancel propagation may be broken", elapsed)
+	}
+}
+
 // createParentChannels 는 n개의 채널을 생성하고, 각 채널에 비동기적으로 주어진 value 를 전송
 func createParentChannels(n int, value runningStatus) []*SafeChannel[runningStatus] {
 	channels := make([]*SafeChannel[runningStatus], n)

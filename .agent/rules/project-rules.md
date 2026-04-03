@@ -28,6 +28,7 @@ Flight 함수(`preFlight`, `inFlight`, `postFlight`, `connectRunner`)와 핵심 
   - "L3(Package-level util)로 추출해 중복을 제거하세요"
 - **Closure Check**: 클로저가 **외부 변수 2개 초과 캡처** 또는 **15줄 초과** 이면:
   - "L2로 분리하고 명시적 파라미터를 사용하세요"
+- **Loop Variable Capture**: 이 repo는 Go 1.22+ 기준선이다. range 루프에서 `k, sc := k, sc` 형태의 명시적 재바인딩은 새 코드에 추가하지 않는다. 기존 코드에 있으면 cleanup backlog 대상이다 (rule.md §11 참고).
 
 ### When suggesting Promotion
 - 의사소통은 한국어로 진행하되, 기술 용어와 코드는 영어를 유지한다.

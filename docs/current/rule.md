@@ -25,6 +25,7 @@ dag-go 는 Kubernetes/외부 프레임워크 없이 동작하는 **순수 Go DAG
 8. [PR 리뷰 체크리스트](#8-pr-리뷰-체크리스트)
 9. [실전 예시: 승격이 필요한 결정적 장면](#9-실전-예시-승격이-필요한-결정적-장면)
 10. [AI/CI Enforcement: .antigravity_rules & golangci-lint](#10-aici-enforcement-antigravity_rules--golangci-lint)
+11. [Go 기준선 및 Cleanup Backlog 정책](#11-go-기준선-및-cleanup-backlog-정책)
 
 ---
 
@@ -47,17 +48,18 @@ dag-go 의 핵심 함수(`preFlight`, `inFlight`, `postFlight`, `connectRunner` 
 
 - **허용**: `logErr`, `copyStatus` 같은 짧은 에러 처리/값 복사 클로저 (캡처 ≤2개)
 - **금지**: 15줄이 넘거나, 동시성 로직을 포함하거나, 외부 채널을 직접 다루는 클로저
-- **주의**: 고루틴 내부 클로저에서 루프 변수 캡처 시 반드시 로컬 변수에 복사할 것
+- **주의**: 이 repo는 **Go 1.22+ 기준선**이다. range 루프 변수는 이터레이션마다 독립적으로 생성된다.
+  명시적 재바인딩(`k := j`)은 **새 코드에서 작성하지 않는다** (§11 Go 기준선 정책 참고).
 
   ```go
-  // Bad: 루프 변수 캡처 문제
-  for j := 0; j < i; j++ {
-      go func() { use(j) }() // j가 공유됨
+  // Good (Go 1.22+): range + closure — 재바인딩 없이 바로 캡처
+  for k, sc := range slice {
+      eg.Go(func() error { return process(k, sc) })
   }
 
-  // Good: 로컬 변수에 복사
+  // Outdated (pre-1.22 방어 스타일): 기존 코드에서 볼 수 있지만 새 코드에서는 작성하지 않는다
   for j := 0; j < i; j++ {
-      k := j
+      k := j              // Go 1.22+ 에서는 불필요한 재바인딩
       go func() { use(k) }()
   }
   ```
@@ -377,3 +379,53 @@ n.runnerVal.Store(&runnerSlot{r: someRunner}) // 항상 *runnerSlot
 - **gosec**: 동시성/보안 취약점 감지
 
 > 목표: "좋은 습관"이 아니라 "CI에서 자동으로 지켜지는 규칙"이 되게 한다.
+
+---
+
+## 11. Go 기준선 및 Cleanup Backlog 정책
+
+### 11.1 최소 Go 기준선
+
+- 이 repo는 **Go 1.22+** 를 코드 작성 기준선으로 한다.
+- `go.mod` 선언 버전이 아니라, **실제 코드 작성 기준**이 Go 1.22+ 임을 명시한다.
+- 새로 작성하거나 수정하는 코드는 이 기준에 맞춰 작성한다.
+
+### 11.2 기존 코드 정리 원칙
+
+- 기존 오래된 스타일 코드는 **지금 일괄 변환하지 않는다.**
+- 별도 cleanup 커밋으로 점진적으로 정리한다.
+- **기능 변경과 스타일 정리는 같은 커밋에 섞지 않는다.**
+- touched code 범위 내에서 자연스럽게 해소하는 방식을 우선한다.
+
+### 11.3 Cleanup Candidate 식별 기준
+
+아래 패턴은 cleanup backlog 대상이다. `//nolint:intrange` 마커에만 한정되지 않는다.
+
+1. **`//nolint:intrange` 마커가 달린 전통 for 루프**
+   — `grep '//nolint:intrange' **/*.go` 로 현재 후보 목록 조회 가능
+2. **`go func(x T)(x)` 형태의 loop variable 함수 인자 전달**
+   — Go 1.22+ range closure 패턴으로 전환 가능
+3. **`k := j` 명시적 loop variable 재바인딩** (루프 내)
+   — 새 코드에서는 작성하지 않음; 기존 코드에 있으면 후보
+
+### 11.4 우선순위 구분
+
+test/helper 코드라고 무조건 후순위로 두지 않는다.
+production behavior를 직접 시뮬레이션하는 test helper는 중간 이상 우선순위로 다룬다.
+
+| 대상 | 우선순위 | 기준 |
+|------|----------|------|
+| Production 코드의 intrange 루프 | 높음 | 기능 변경 없이 range 전환 가능한 것 우선 |
+| preFlight 등 의미론 검증과 직접 연결된 test helper | 중간 | 선언한 정책과 helper 스타일이 불일치하면 정리 |
+| 순수 load/stress test helper | 낮음 | 동작이 정확하면 스타일은 후순위 |
+
+### 11.5 현재 시점 Cleanup Candidate 예시
+
+코드 전면 수정은 하지 않는다. 아래는 식별된 후보 목록이다.
+
+| 파일 | 위치 | 패턴 | 우선순위 |
+|------|------|------|----------|
+| `node_test.go` | `createParentChannels` | `go func(sc *SafeChannel)(sc)` — loop var 함수 전달 | 중간 |
+| `node_bench_test.go` | `setupNode` | `go func(s *SafeChannel)(sc)` — 동일 패턴 | 중간 |
+| `node_test.go` | `TestTransitionStatus_ConcurrentFullLifecycle` phase 2 | `go func(idx int)(i)` | 낮음 |
+| `dag.go` | `NewDagWorkerPool` | `for i := 0; i < limit; i++ { //nolint:intrange` — goroutine 내 loop var 미사용 | 낮음 |
